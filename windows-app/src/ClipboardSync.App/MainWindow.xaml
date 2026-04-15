@@ -1,0 +1,189 @@
+<Window x:Class="ClipboardSync.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Clipboard Sync"
+        Width="1080"
+        Height="760"
+        WindowStartupLocation="CenterScreen">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Padding="16"
+                    CornerRadius="18"
+                    Background="#14283B">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Clipboard Sync"
+                                   FontSize="26"
+                                   FontWeight="SemiBold"
+                                   Foreground="White" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Text="{Binding StatusSummary}"
+                                   Foreground="#DDEBFF" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Text="{Binding GuidanceText}"
+                                   Foreground="#A7C7E8"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1"
+                                VerticalAlignment="Center">
+                        <CheckBox Content="Sync enabled"
+                                  IsChecked="{Binding SyncEnabled}"
+                                  Foreground="White"
+                                  FontWeight="SemiBold" />
+                        <Button Margin="0,12,0,0"
+                                Padding="12,8"
+                                Content="Reconnect"
+                                Command="{Binding ReconnectCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <UniformGrid Grid.Row="1"
+                         Margin="0,18,0,0"
+                         Columns="3">
+                <Border Margin="0,0,12,0"
+                        Padding="14"
+                        CornerRadius="16"
+                        Background="#EEF5FB">
+                    <StackPanel>
+                        <TextBlock Text="Paired Device" FontWeight="Bold" />
+                        <TextBlock Margin="0,6,0,0" Text="{Binding PairedDeviceLabel}" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="0,0,12,0"
+                        Padding="14"
+                        CornerRadius="16"
+                        Background="#EEF5FB">
+                    <StackPanel>
+                        <TextBlock Text="Connection" FontWeight="Bold" />
+                        <TextBlock Margin="0,6,0,0" Text="{Binding ConnectionLabel}" />
+                    </StackPanel>
+                </Border>
+                <Border Padding="14"
+                        CornerRadius="16"
+                        Background="#EEF5FB">
+                    <StackPanel>
+                        <TextBlock Text="Transport" FontWeight="Bold" />
+                        <TextBlock Margin="0,6,0,0" Text="{Binding TransportLabel}" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <Grid Grid.Row="2" Margin="0,18,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        Margin="0,0,12,0"
+                        Padding="16"
+                        CornerRadius="16"
+                        Background="#F7FAFD">
+                    <StackPanel>
+                        <TextBlock Text="Pairing Payload"
+                                   FontSize="16"
+                                   FontWeight="Bold" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Text="Copy this payload into the Android app. It includes the LAN endpoint, certificate fingerprint, and pairing secret."
+                                   TextWrapping="Wrap" />
+                        <TextBox Margin="0,12,0,0"
+                                 MinHeight="90"
+                                 Text="{Binding PairingPayload, Mode=OneWay}"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 IsReadOnly="True" />
+                        <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                            <Button Padding="12,8"
+                                    Content="Copy Pairing Payload"
+                                    Command="{Binding CopyPairingPayloadCommand}" />
+                            <Button Margin="12,0,0,0"
+                                    Padding="12,8"
+                                    Content="Regenerate Pairing Code"
+                                    Command="{Binding RegeneratePairingCodeCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1"
+                        Padding="16"
+                        CornerRadius="16"
+                        Background="#F7FAFD">
+                    <StackPanel>
+                        <TextBlock Text="Last Item"
+                                   FontSize="16"
+                                   FontWeight="Bold" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Text="{Binding LastItemSummary}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="3" Margin="0,18,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <GroupBox Grid.Column="0" Header="Recent History" Margin="0,0,12,0">
+                    <ListView ItemsSource="{Binding RecentItems}">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Direction" DisplayMemberBinding="{Binding DirectionLabel}" Width="130" />
+                                <GridViewColumn Header="Type" DisplayMemberBinding="{Binding ContentType}" Width="100" />
+                                <GridViewColumn Header="Preview" DisplayMemberBinding="{Binding PreviewText}" Width="330" />
+                                <GridViewColumn Header="State" DisplayMemberBinding="{Binding Status}" Width="110" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </GroupBox>
+
+                <GroupBox Grid.Column="1" Header="Diagnostics">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Top"
+                                Margin="0,0,0,8"
+                                Padding="10,6"
+                                HorizontalAlignment="Right"
+                                Content="Clear Logs"
+                                Command="{Binding ClearLogsCommand}" />
+                        <ListView ItemsSource="{Binding LogEntries}">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Level" DisplayMemberBinding="{Binding Level}" Width="70" />
+                                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding TimestampUtc}" Width="190" />
+                                    <GridViewColumn Header="Message" DisplayMemberBinding="{Binding Message}" Width="360" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </DockPanel>
+                </GroupBox>
+            </Grid>
+
+            <Border Grid.Row="4"
+                    Margin="0,18,0,0"
+                    Padding="16"
+                    CornerRadius="16"
+                    Background="#FFF3E7">
+                <TextBlock Text="Android outbound clipboard detection is foreground-only for non-IME apps on modern Android. This Windows app remains always available in the tray and continues serving inbound sync sessions."
+                           TextWrapping="Wrap" />
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</Window>

@@ -1,0 +1,2 @@
+551ae44e8a0c19c416169032da80a38212cf42cd5e1c56a5ca4b47be8d9dd9bc *dist\android\ClipboardSync-android-debug.apk
+f4a69bb2d53ec68f5e39f0efc28d9bd5e34cccb3ae60d79be6240616835ea92a *dist\windows\ClipboardSync-windows-x64.zip

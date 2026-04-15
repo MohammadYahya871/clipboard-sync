@@ -1,0 +1,13 @@
+{
+  "type": "transfer_begin",
+  "timestampUtc": "2026-04-15T01:02:03.323Z",
+  "sessionId": "6e1565fb-ed11-44ee-af41-bf62845f72d8",
+  "deviceId": "win-desktop-01",
+  "transfer": {
+    "transferId": "0195f067-b6cf-7f11-9ce0-91d708672fed",
+    "eventId": "0195f067-b6cf-7a70-a2f8-1f0cc0d9f7aa",
+    "totalChunks": 3,
+    "totalBytes": 183274,
+    "checksumSha256": "04d8d2395862d6bdc8d1f4b8779e2e18f8cf4d70a340c63484726d059f291089"
+  }
+}

@@ -1,0 +1,21 @@
+# Android
+.gradle/
+local.properties
+**/build/
+captures/
+dist/android/*.apk
+
+# Windows / .NET
+.dotnet/
+bin/
+obj/
+.vs/
+dist/windows/*.zip
+
+# OS / tooling
+.idea/
+*.user
+*.suo
+*.log
+*.tmp
+Thumbs.db

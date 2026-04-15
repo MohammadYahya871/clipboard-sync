@@ -1,0 +1,20 @@
+{
+  "type": "clipboard_offer",
+  "timestampUtc": "2026-04-15T01:02:03.123Z",
+  "sessionId": "6e1565fb-ed11-44ee-af41-bf62845f72d8",
+  "deviceId": "win-desktop-01",
+  "event": {
+    "eventId": "0195f067-b6cf-7a70-a2f8-1f0cc0d9f7aa",
+    "sourceDeviceId": "win-desktop-01",
+    "originatedAtUtc": "2026-04-15T01:02:03.123Z",
+    "contentType": "TEXT",
+    "mimeType": "text/plain",
+    "payloadSizeBytes": 26,
+    "contentHashSha256": "18ef22b6b0f1681fdf4e7791ea9368045a385cd2cb8d4d3e2358e292c086ed87",
+    "dedupeKey": "win-desktop-01:18ef22b6b0f1681fdf4e7791ea9368045a385cd2cb8d4d3e2358e292c086ed87",
+    "transferState": "SENDING",
+    "textPayload": "https://example.com/docs",
+    "image": null
+  }
+}
+

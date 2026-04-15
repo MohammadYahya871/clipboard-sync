@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.clipboardsync/schemas/clipboard-envelope.schema.json",
+  "title": "Clipboard Sync Envelope",
+  "type": "object",
+  "required": [
+    "type",
+    "timestampUtc"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "auth_challenge",
+        "auth_response",
+        "peer_status",
+        "clipboard_offer",
+        "transfer_begin",
+        "transfer_chunk",
+        "transfer_complete",
+        "clipboard_ack",
+        "clipboard_reject",
+        "ping",
+        "pong"
+      ]
+    },
+    "timestampUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "deviceId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "challenge": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "response": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "event": {
+      "$ref": "#/$defs/clipboardEvent"
+    },
+    "transfer": {
+      "$ref": "#/$defs/transfer"
+    },
+    "chunk": {
+      "$ref": "#/$defs/transferChunk"
+    }
+  },
+  "$defs": {
+    "clipboardEvent": {
+      "type": "object",
+      "required": [
+        "eventId",
+        "sourceDeviceId",
+        "originatedAtUtc",
+        "contentType",
+        "mimeType",
+        "payloadSizeBytes",
+        "contentHashSha256",
+        "dedupeKey",
+        "transferState"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string"
+        },
+        "sourceDeviceId": {
+          "type": "string"
+        },
+        "originatedAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "TEXT",
+            "URL",
+            "IMAGE",
+            "MIXED_UNSUPPORTED"
+          ]
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "payloadSizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contentHashSha256": {
+          "type": "string"
+        },
+        "dedupeKey": {
+          "type": "string"
+        },
+        "transferState": {
+          "type": "string",
+          "enum": [
+            "QUEUED",
+            "SENDING",
+            "AWAITING_ACK",
+            "ACKED",
+            "FAILED",
+            "DEFERRED"
+          ]
+        },
+        "textPayload": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "$ref": "#/$defs/imageMetadata"
+        }
+      }
+    },
+    "imageMetadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checksumSha256": {
+          "type": "string"
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "transferId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "transfer": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "totalChunks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checksumSha256": {
+          "type": "string"
+        }
+      }
+    },
+    "transferChunk": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string"
+        },
+        "chunkIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "base64Payload": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
+
