@@ -11,11 +11,19 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_SVG = ROOT / "shared" / "branding" / "ic_fluent_clipboard_arrow_right_24_filled.svg"
 ANDROID_DRAWABLE = ROOT / "android-app" / "app" / "src" / "main" / "res" / "drawable"
+ANDROID_RES = ROOT / "android-app" / "app" / "src" / "main" / "res"
 WINDOWS_ASSETS = ROOT / "windows-app" / "src" / "ClipboardSync.App" / "Assets"
 
 BACKGROUND_COLOR = "#113A5C"
 FOREGROUND_COLOR = "#FFFFFF"
 ICON_SIZE = 1024
+ANDROID_MIPMAP_SIZES = {
+    "mipmap-mdpi": 48,
+    "mipmap-hdpi": 72,
+    "mipmap-xhdpi": 96,
+    "mipmap-xxhdpi": 144,
+    "mipmap-xxxhdpi": 192,
+}
 BROWSER_CANDIDATES = [
     Path(r"C:\Program Files (x86)\Microsoft\EdgeCore\147.0.3912.60\msedge.exe"),
     Path(r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\147.0.3912.60\msedge.exe"),
@@ -70,7 +78,7 @@ def locate_browser() -> Path:
     raise RuntimeError("No supported headless browser was found to render the Windows app icon.")
 
 
-def render_windows_icon(path_data: str) -> None:
+def render_windows_icon(path_data: str) -> Image.Image:
     WINDOWS_ASSETS.mkdir(parents=True, exist_ok=True)
     icon_png = WINDOWS_ASSETS / "AppIcon.png"
     icon_ico = WINDOWS_ASSETS / "AppIcon.ico"
@@ -142,6 +150,16 @@ def render_windows_icon(path_data: str) -> None:
         image.save(icon_png)
         image.save(preview_png)
         image.save(icon_ico, sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
+        return image
+
+
+def write_android_raster_icons(image: Image.Image) -> None:
+    for folder_name, size in ANDROID_MIPMAP_SIZES.items():
+        target_dir = ANDROID_RES / folder_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        resized = image.resize((size, size), Image.LANCZOS)
+        resized.save(target_dir / "ic_launcher.png")
+        resized.save(target_dir / "ic_launcher_round.png")
 
 
 def main() -> None:
@@ -152,7 +170,8 @@ def main() -> None:
     write_android_vector(ANDROID_DRAWABLE / "ic_launcher_foreground.xml", path_data, FOREGROUND_COLOR, 108)
     write_android_vector(ANDROID_DRAWABLE / "ic_notification.xml", path_data, "#FFFFFF", 24)
     write_background(ANDROID_DRAWABLE / "ic_launcher_background.xml", BACKGROUND_COLOR)
-    render_windows_icon(path_data)
+    rendered_icon = render_windows_icon(path_data)
+    write_android_raster_icons(rendered_icon)
 
 
 if __name__ == "__main__":

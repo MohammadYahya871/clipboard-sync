@@ -3,6 +3,7 @@ package com.clipboardsync.android.clipboard
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.clipboardsync.android.diagnostics.AppLogger
@@ -40,9 +41,7 @@ class ImageCacheStore(
 
     suspend fun cacheClipboardImage(uri: Uri): Pair<CachedImage, ByteArray>? = withContext(Dispatchers.IO) {
         runCatching {
-            val bitmap = context.contentResolver.openInputStream(uri).use { input ->
-                BitmapFactory.decodeStream(input)
-            } ?: return@runCatching null
+            val bitmap = decodeClipboardBitmap(uri) ?: return@runCatching null
 
             val targetFile = File(cacheDir, "${Instant.now().toEpochMilli()}-${CryptoUtils.uuidV7()}.png")
             val bytes = writeBitmapPng(bitmap, targetFile)
@@ -83,11 +82,40 @@ class ImageCacheStore(
         )
     }
 
+    private fun decodeClipboardBitmap(uri: Uri): Bitmap? {
+        val source = runCatching {
+            ImageDecoder.createSource(context.contentResolver, uri)
+        }.getOrElse {
+            logger.warn("ImageDecoder could not create a source for clipboard URI $uri")
+            return null
+        }
+
+        return runCatching {
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                val longestSide = maxOf(info.size.width, info.size.height)
+                if (longestSide > MAX_IMAGE_DIMENSION) {
+                    val sampleSize = (longestSide / MAX_IMAGE_DIMENSION).coerceAtLeast(1)
+                    decoder.setTargetSampleSize(sampleSize)
+                    logger.warn("Downsampling large clipboard image from $longestSide px using sample size $sampleSize")
+                }
+            }
+        }.recoverCatching {
+            context.contentResolver.openInputStream(uri).use { input ->
+                BitmapFactory.decodeStream(input)
+            }
+        }.onFailure {
+            logger.error("Failed to decode clipboard image URI $uri", it)
+        }.getOrNull()
+    }
+
     private fun writeBitmapPng(bitmap: Bitmap, file: File): ByteArray {
         FileOutputStream(file).use { stream ->
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
         }
         return file.readBytes()
     }
-}
 
+    private companion object {
+        private const val MAX_IMAGE_DIMENSION = 4096
+    }
+}

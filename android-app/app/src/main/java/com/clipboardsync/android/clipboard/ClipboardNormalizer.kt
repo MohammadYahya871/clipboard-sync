@@ -33,6 +33,22 @@ class ClipboardNormalizer(
     suspend fun normalizeClip(clip: ClipData): NormalizedClipboard? = withContext(Dispatchers.IO) {
         val item = clip.getItemAt(0)
         val sourceDeviceId = localDeviceIdentityStore.deviceId
+        val clipMimeTypes = buildList {
+            val description = clip.description
+            if (description != null) {
+                for (index in 0 until description.mimeTypeCount) {
+                    add(description.getMimeType(index))
+                }
+            }
+        }
+
+        item.uri?.let { uri ->
+            if (shouldTryImageFirst(uri, clipMimeTypes)) {
+                logger.info("Attempting to normalize clipboard image URI $uri (${clipMimeTypes.joinToString()})")
+                normalizeImageUri(uri, sourceDeviceId)?.let { return@withContext it }
+                logger.warn("Clipboard image URI could not be decoded and will fall back to other representations")
+            }
+        }
 
         item.text?.toString()?.takeIf { it.isNotBlank() }?.let { text ->
             val normalizedText = text.replace("\r\n", "\n")
@@ -54,43 +70,58 @@ class ClipboardNormalizer(
             )
         }
 
-        val uri = item.uri
-        if (uri != null && isImageUri(uri)) {
-            val cached = imageCacheStore.cacheClipboardImage(uri)
-            if (cached != null) {
-                val (image, bytes) = cached
-                return@withContext NormalizedClipboard(
-                    event = ClipboardEvent(
-                        eventId = CryptoUtils.uuidV7(),
-                        sourceDeviceId = sourceDeviceId,
-                        contentType = ContentType.IMAGE,
-                        mimeType = "image/png",
-                        payloadSizeBytes = image.byteSize,
-                        contentHashSha256 = image.checksumSha256,
-                        dedupeKey = "$sourceDeviceId:${image.checksumSha256}",
-                        transferState = TransferState.QUEUED,
-                        image = ImageMetadata(
-                            width = image.width,
-                            height = image.height,
-                            byteSize = image.byteSize,
-                            checksumSha256 = image.checksumSha256,
-                            encoding = "png",
-                            transferId = CryptoUtils.uuidV7()
-                        )
-                    ),
-                    imageBytes = bytes,
-                    previewText = "Image ${image.width}x${image.height}",
-                    previewUri = image.uri.toString()
-                )
-            }
+        item.uri?.let { uri ->
+            normalizeImageUri(uri, sourceDeviceId)?.let { return@withContext it }
         }
 
         logger.warn("Clipboard entry is unsupported or empty")
         null
     }
 
-    private fun isImageUri(uri: Uri): Boolean {
-        val type = context.contentResolver.getType(uri) ?: return false
-        return type.startsWith("image/")
+    private suspend fun normalizeImageUri(
+        uri: Uri,
+        sourceDeviceId: String
+    ): NormalizedClipboard? {
+        val cached = imageCacheStore.cacheClipboardImage(uri) ?: return null
+        val (image, bytes) = cached
+        return NormalizedClipboard(
+            event = ClipboardEvent(
+                eventId = CryptoUtils.uuidV7(),
+                sourceDeviceId = sourceDeviceId,
+                contentType = ContentType.IMAGE,
+                mimeType = "image/png",
+                payloadSizeBytes = image.byteSize,
+                contentHashSha256 = image.checksumSha256,
+                dedupeKey = "$sourceDeviceId:${image.checksumSha256}",
+                transferState = TransferState.QUEUED,
+                image = ImageMetadata(
+                    width = image.width,
+                    height = image.height,
+                    byteSize = image.byteSize,
+                    checksumSha256 = image.checksumSha256,
+                    encoding = "png",
+                    transferId = CryptoUtils.uuidV7()
+                )
+            ),
+            imageBytes = bytes,
+            previewText = "Image ${image.width}x${image.height}",
+            previewUri = image.uri.toString()
+        )
+    }
+
+    private fun shouldTryImageFirst(uri: Uri, clipMimeTypes: List<String>): Boolean {
+        if (clipMimeTypes.any { it.startsWith("image/") }) {
+            return true
+        }
+
+        val resolverType = runCatching {
+            context.contentResolver.getType(uri)
+        }.getOrNull()
+
+        if (resolverType?.startsWith("image/") == true) {
+            return true
+        }
+
+        return uri.scheme == "content" || uri.scheme == "file"
     }
 }

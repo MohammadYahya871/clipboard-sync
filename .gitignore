@@ -4,6 +4,7 @@ local.properties
 **/build/
 captures/
 dist/android/*.apk
+dist/windows/*/
 
 # Windows / .NET
 .dotnet/
