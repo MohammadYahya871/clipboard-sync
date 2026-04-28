@@ -26,15 +26,27 @@ class ClipboardSyncViewModel(
 
     fun onNotificationEnabledChanged(enabled: Boolean) = repository.setNotificationEnabled(enabled)
 
+    fun onAutoScreenshotSyncChanged(enabled: Boolean) = repository.setAutoScreenshotSyncEnabled(enabled)
+
+    fun onPrivacyPausedChanged(paused: Boolean) = repository.setPrivacyPaused(paused)
+
     fun onPair(payload: String) = repository.pair(payload)
 
     fun onManualPayloadChanged(payload: String) = repository.updateManualPairingPayload(payload)
 
     fun onReconnect() = repository.reconnect()
 
-    fun onSyncCurrentClipboard() = repository.syncCurrentClipboardNow()
+    fun onScanSavedDevices() = repository.scanSavedDevices()
+
+    fun onSelectSavedDevice(deviceId: String) = repository.selectSavedDevice(deviceId)
+
+    fun onSyncSmart() = repository.syncSmartNow()
+
+    fun onResendRecent(eventId: String) = repository.resendRecent(eventId)
 
     fun onClearLogs() = repository.clearLogs()
+
+    fun onCopyDebugReport() = repository.copyDebugReport()
 }
 
 class ClipboardSyncViewModelFactory(

@@ -10,7 +10,6 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.clipboardsync.android.R
 import com.clipboardsync.android.MainActivity
-import com.clipboardsync.android.NotificationSyncActivity
 
 object SyncNotificationHelper {
     const val CHANNEL_ID = "clipboard_sync"
@@ -38,12 +37,10 @@ object SyncNotificationHelper {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val syncNowIntent = PendingIntent.getActivity(
+        val pauseIntent = PendingIntent.getService(
             context,
             101,
-            Intent(context, NotificationSyncActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
-            },
+            Intent(context, ForegroundSyncService::class.java).setAction(ForegroundSyncService.ACTION_PAUSE_PRIVACY),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -52,11 +49,7 @@ object SyncNotificationHelper {
             .setContentText(context.getString(R.string.service_notification_text))
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(openAppIntent)
-            .addAction(
-                0,
-                context.getString(R.string.service_notification_action_sync),
-                syncNowIntent
-            )
+            .addAction(0, context.getString(R.string.service_notification_action_pause), pauseIntent)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .build()

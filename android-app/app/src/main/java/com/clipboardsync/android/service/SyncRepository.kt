@@ -1,12 +1,17 @@
 package com.clipboardsync.android.service
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.database.ContentObserver
 import android.util.Base64
 import com.clipboardsync.android.clipboard.ClipboardApplyUseCase
 import com.clipboardsync.android.clipboard.ClipboardNormalizer
 import com.clipboardsync.android.clipboard.ImageCacheStore
 import com.clipboardsync.android.clipboard.LoopGuard
+import com.clipboardsync.android.clipboard.ScreenshotRepository
+import com.clipboardsync.android.protocol.ImageMetadata
 import com.clipboardsync.android.diagnostics.AppLogger
 import com.clipboardsync.android.diagnostics.LogEntry
 import com.clipboardsync.android.pairing.LocalDeviceIdentityStore
@@ -21,6 +26,7 @@ import com.clipboardsync.android.protocol.TransportKind
 import com.clipboardsync.android.storage.CryptoUtils
 import com.clipboardsync.android.transport.LanClient
 import com.clipboardsync.android.transport.LanConnectionState
+import com.clipboardsync.android.transport.LanPeerDiscovery
 import com.clipboardsync.android.transport.NsdPeerDiscovery
 import com.clipboardsync.android.transport.TransportSelector
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +57,15 @@ data class RecentItemUiModel(
     val status: String
 )
 
+data class SavedDeviceUiModel(
+    val deviceId: String,
+    val displayName: String,
+    val endpoint: String,
+    val selected: Boolean,
+    val available: Boolean,
+    val connected: Boolean
+)
+
 data class SyncUiState(
     val syncEnabled: Boolean = true,
     val notificationEnabled: Boolean = true,
@@ -60,8 +75,11 @@ data class SyncUiState(
     val lastSyncedItem: RecentItemUiModel? = null,
     val recentItems: List<RecentItemUiModel> = emptyList(),
     val logs: List<LogEntry> = emptyList(),
+    val savedDevices: List<SavedDeviceUiModel> = emptyList(),
     val manualPairingPayload: String = "",
-    val guidance: String = "Android clipboard reads are only reliable while this app is visible or foreground-active. Copy in another app, then return here to push the current clipboard to Windows. Keep the notification enabled if you want the pinned Sync now shortcut and background inbound sync."
+    val autoScreenshotSyncEnabled: Boolean = true,
+    val privacyPaused: Boolean = false,
+    val guidance: String = "Add the Clipboard Sync Quick Settings tile for the fastest one-tap send. The smart sync action prefers a fresh latest screenshot by copying it into Android clipboard and sending it to Windows; otherwise it falls back to the current clipboard. The notification now mainly keeps the background link alive."
 )
 
 private data class PendingEvent(
@@ -82,20 +100,25 @@ class SyncRepository(
     private val localDeviceIdentityStore: LocalDeviceIdentityStore,
     private val trustedDeviceRepository: TrustedDeviceRepository,
     private val imageCacheStore: ImageCacheStore,
+    private val screenshotRepository: ScreenshotRepository,
     private val clipboardNormalizer: ClipboardNormalizer,
     private val clipboardApplyUseCase: ClipboardApplyUseCase,
     private val lanClient: LanClient,
+    private val lanPeerDiscovery: LanPeerDiscovery,
     private val nsdPeerDiscovery: NsdPeerDiscovery,
     private val transportSelector: TransportSelector,
     private val loopGuard: LoopGuard
 ) {
     private val appContext = app.applicationContext
+    private val clipboardManager = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     private val prefs = app.getSharedPreferences("sync_prefs", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _uiState = MutableStateFlow(
         SyncUiState(
             syncEnabled = isSyncEnabled(),
-            notificationEnabled = isNotificationEnabled()
+            notificationEnabled = isNotificationEnabled(),
+            autoScreenshotSyncEnabled = isAutoScreenshotSyncEnabled(),
+            privacyPaused = isPrivacyPaused()
         )
     )
     val uiState: StateFlow<SyncUiState> = _uiState.asStateFlow()
@@ -108,10 +131,15 @@ class SyncRepository(
     private var lastLocalClipboardAt = Instant.EPOCH
     private var lastQueuedLocalHash: String? = null
     private var reconnectJob: Job? = null
+    private var discoveryConnectJob: Job? = null
+    private var availablePeerIds: Set<String> = emptySet()
+    private var screenshotObserver: ContentObserver? = null
+    private var lastSyncedScreenshotId: Long = prefs.getLong(KEY_LAST_SCREENSHOT_ID, -1L)
 
     init {
         imageCacheStore.cleanup()
         refreshPairedState()
+        updateScreenshotObserver()
         scope.launch {
             logger.entries.collectLatest { entries ->
                 _uiState.value = _uiState.value.copy(logs = entries)
@@ -139,7 +167,7 @@ class SyncRepository(
                 ForegroundSyncService.sync(appContext)
             }
             scope.launch {
-                syncCurrentClipboardIfNeeded("foreground-resume")
+                syncCurrentClipboardWithRetryWindow("foreground-resume")
             }
         }
     }
@@ -166,6 +194,7 @@ class SyncRepository(
             lanClient.disconnect()
             ForegroundSyncService.stop(appContext)
         }
+        updateScreenshotObserver()
     }
 
     fun setNotificationEnabled(enabled: Boolean) {
@@ -184,8 +213,34 @@ class SyncRepository(
         }
     }
 
+    fun setAutoScreenshotSyncEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_SCREENSHOT_SYNC_ENABLED, enabled).apply()
+        _uiState.value = _uiState.value.copy(autoScreenshotSyncEnabled = enabled)
+        logger.info("Auto screenshot sync set to $enabled")
+        updateScreenshotObserver()
+    }
+
+    fun setPrivacyPaused(paused: Boolean) {
+        prefs.edit().putBoolean(KEY_PRIVACY_PAUSED, paused).apply()
+        _uiState.value = _uiState.value.copy(privacyPaused = paused)
+        logger.warn(if (paused) "Privacy pause enabled; outbound sync paused" else "Privacy pause disabled; outbound sync resumed")
+    }
+
     fun reconnect() {
         logger.info("Manual reconnect requested")
+        ensureConnected(force = true)
+    }
+
+    fun scanSavedDevices() {
+        scope.launch {
+            scanSavedPeers(connectSelected = false)
+        }
+    }
+
+    fun selectSavedDevice(deviceId: String) {
+        trustedDeviceRepository.selectPeer(deviceId)
+        lanClient.disconnect()
+        refreshPairedState()
         ensureConnected(force = true)
     }
 
@@ -198,12 +253,71 @@ class SyncRepository(
         scope.launch {
             logger.info("Manual clipboard sync requested from $trigger")
             ensureConnected(force = true)
-            syncCurrentClipboardIfNeeded(
+            syncCurrentClipboardWithRetryWindow(
                 trigger = trigger,
                 forceResend = true,
                 logUnavailableReason = true
             )
         }
+    }
+
+    fun syncSmartNow(trigger: String = "smart-sync") {
+        if (!isSyncEnabled() || isPrivacyPaused()) {
+            logger.warn("Smart sync skipped because sync is disabled or privacy paused")
+            return
+        }
+
+        scope.launch {
+            ensureConnected(force = true)
+            val screenshotSynced = syncLatestScreenshotToClipboardIfAvailable("$trigger-screenshot")
+            if (!screenshotSynced) {
+                syncCurrentClipboardWithRetryWindow(
+                    trigger = "$trigger-clipboard",
+                    forceResend = true,
+                    logUnavailableReason = true
+                )
+            }
+        }
+    }
+
+    fun syncLatestScreenshotNow(trigger: String = "manual-screenshot") {
+        if (!isSyncEnabled() || isPrivacyPaused()) {
+            logger.warn("Screenshot sync skipped because sync is disabled or privacy paused")
+            return
+        }
+
+        scope.launch {
+            ensureConnected(force = true)
+            syncLatestScreenshotIfNeeded(trigger = trigger, force = true)
+        }
+    }
+
+    fun resendRecent(eventId: String) {
+        val pending = pendingByEventId[eventId]
+        if (pending == null) {
+            logger.warn("Only queued or pending items can be resent in this preview build")
+            return
+        }
+        outboundQueue.addLast(pending)
+        logger.info("Requeued clipboard event $eventId")
+        flushQueue()
+    }
+
+    fun copyDebugReport() {
+        val report = buildString {
+            appendLine("Clipboard Sync Android Debug Report")
+            appendLine("Connection: ${uiState.value.connectionLabel}")
+            appendLine("Selected device: ${uiState.value.pairedDeviceLabel}")
+            appendLine("Transport: ${uiState.value.transportKind}")
+            appendLine("Saved devices: ${uiState.value.savedDevices.joinToString { "${it.displayName} ${it.endpoint}" }}")
+            appendLine("Recent logs:")
+            uiState.value.logs.take(30).forEach {
+                appendLine("${it.timestampUtc} [${it.level}] ${it.message}")
+            }
+        }
+        val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Clipboard Sync debug report", report))
+        logger.info("Copied debug report to clipboard")
     }
 
     fun clearLogs() {
@@ -228,7 +342,7 @@ class SyncRepository(
     }
 
     fun onClipboardChanged() {
-        if (!uiForeground || !isSyncEnabled()) {
+        if (!uiForeground || !isSyncEnabled() || isPrivacyPaused()) {
             return
         }
         scope.launch {
@@ -240,12 +354,19 @@ class SyncRepository(
 
     private fun isNotificationEnabled(): Boolean = prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true)
 
+    private fun isAutoScreenshotSyncEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_SCREENSHOT_SYNC_ENABLED, true)
+
+    private fun isPrivacyPaused(): Boolean = prefs.getBoolean(KEY_PRIVACY_PAUSED, false)
+
     private fun refreshPairedState() {
         val peer = trustedDeviceRepository.getTrustedPeer()
         _uiState.value = _uiState.value.copy(
             pairedDeviceLabel = peer?.displayName ?: "Not paired",
             syncEnabled = isSyncEnabled(),
-            notificationEnabled = isNotificationEnabled()
+            notificationEnabled = isNotificationEnabled(),
+            autoScreenshotSyncEnabled = isAutoScreenshotSyncEnabled(),
+            privacyPaused = isPrivacyPaused(),
+            savedDevices = buildSavedDeviceModels()
         )
     }
 
@@ -257,13 +378,59 @@ class SyncRepository(
         if (!force && lanClient.state.value in listOf(LanConnectionState.CONNECTING, LanConnectionState.CONNECTED, LanConnectionState.READY)) {
             return
         }
-        val discovered = nsdPeerDiscovery.knownHostFor(peer.serviceName)
-        val effectivePeer = if (discovered != null) {
-            peer.copy(host = discovered.host, port = discovered.port)
-        } else {
-            peer
+        val nsdDiscovered = nsdPeerDiscovery.knownHostFor(peer.serviceName)
+        if (nsdDiscovered != null) {
+            val effectivePeer = peer.copy(host = nsdDiscovered.host, port = nsdDiscovered.port)
+            trustedDeviceRepository.updateEndpoint(effectivePeer)
+            lanClient.connect(effectivePeer, localDeviceIdentityStore.deviceId)
+            return
         }
-        lanClient.connect(effectivePeer, localDeviceIdentityStore.deviceId)
+
+        if (force) {
+            lanClient.connect(peer, localDeviceIdentityStore.deviceId)
+        } else {
+            logger.info("Searching for saved peer ${peer.displayName} before autoconnect")
+        }
+        discoverAndConnectSavedPeer(peer, force)
+    }
+
+    private fun discoverAndConnectSavedPeer(peer: com.clipboardsync.android.pairing.TrustedPeer, force: Boolean) {
+        if (discoveryConnectJob?.isActive == true) return
+        discoveryConnectJob = scope.launch {
+            val discovered = lanPeerDiscovery.discoverTrustedPeer(peer) ?: return@launch
+            trustedDeviceRepository.updateEndpoint(discovered)
+            val shouldReconnect = force ||
+                lanClient.state.value == LanConnectionState.FAILED ||
+                lanClient.state.value == LanConnectionState.DISCONNECTED ||
+                discovered.host != peer.host ||
+                discovered.port != peer.port
+            if (shouldReconnect && isSyncEnabled()) {
+                logger.info("Autoconnecting to saved peer ${discovered.displayName} at ${discovered.host}:${discovered.port}")
+                lanClient.connect(discovered, localDeviceIdentityStore.deviceId)
+            }
+        }
+    }
+
+    private suspend fun scanSavedPeers(connectSelected: Boolean) {
+        val peers = trustedDeviceRepository.getTrustedPeers()
+        if (peers.isEmpty()) {
+            logger.warn("No saved devices to scan")
+            refreshPairedState()
+            return
+        }
+
+        val discovered = peers.mapNotNull { lanPeerDiscovery.discoverTrustedPeer(it, timeoutMillis = 700) }
+        availablePeerIds = discovered.map { it.deviceId }.toSet()
+        discovered.forEach { trustedDeviceRepository.updateEndpoint(it) }
+        refreshPairedState()
+
+        if (connectSelected) {
+            trustedDeviceRepository.getTrustedPeer()?.let { selected ->
+                discovered.firstOrNull { it.deviceId == selected.deviceId }?.let {
+                    lanClient.connect(it, localDeviceIdentityStore.deviceId)
+                }
+            }
+        }
     }
 
     private fun enqueueOutbound(normalized: NormalizedClipboard) {
@@ -322,7 +489,8 @@ class SyncRepository(
         }
         _uiState.value = _uiState.value.copy(
             connectionLabel = label,
-            transportKind = transport
+            transportKind = transport,
+            savedDevices = buildSavedDeviceModels()
         )
         if (state == LanConnectionState.READY) {
             reconnectJob?.cancel()
@@ -484,10 +652,16 @@ class SyncRepository(
     private suspend fun syncCurrentClipboardIfNeeded(
         trigger: String,
         forceResend: Boolean = false,
-        logUnavailableReason: Boolean = false
+        logUnavailableReason: Boolean = false,
+        logSnapshot: Boolean = false
     ) {
+        if (isPrivacyPaused()) {
+            logger.warn("Skipped clipboard sync because privacy pause is enabled")
+            return
+        }
+
         val normalized = runCatching {
-            clipboardNormalizer.normalizeCurrentClipboard()
+            clipboardNormalizer.normalizeCurrentClipboard(logSnapshot = logSnapshot)
         }.getOrElse {
             logger.error("Failed to read clipboard for $trigger", it)
             return
@@ -519,6 +693,207 @@ class SyncRepository(
         addRecent(normalized, "Android -> Windows", "Queued")
         logger.info("Queued Android clipboard event ${normalized.event.eventId} from $trigger")
         flushQueue()
+    }
+
+    private suspend fun syncCurrentClipboardWithRetryWindow(
+        trigger: String,
+        forceResend: Boolean = false,
+        logUnavailableReason: Boolean = false
+    ) {
+        val initial = readCurrentClipboard(
+            trigger = trigger,
+            logUnavailableReason = logUnavailableReason,
+            logSnapshot = forceResend || trigger == "foreground-resume"
+        ) ?: return
+
+        var chosen = initial
+        if (chosen.event.contentHashSha256 == lastQueuedLocalHash) {
+            logger.info("Clipboard matches the last queued item on $trigger; waiting briefly for a fresher clipboard value")
+            repeat(CLIPBOARD_REFRESH_RETRY_COUNT) { attempt ->
+                delay(CLIPBOARD_REFRESH_RETRY_DELAY_MS)
+                val retried = readCurrentClipboard(
+                    trigger = "$trigger-retry-${attempt + 1}",
+                    logUnavailableReason = false,
+                    logSnapshot = attempt == CLIPBOARD_REFRESH_RETRY_COUNT - 1
+                ) ?: return@repeat
+
+                if (retried.event.contentHashSha256 != chosen.event.contentHashSha256 ||
+                    retried.event.contentType != chosen.event.contentType ||
+                    retried.previewUri != chosen.previewUri
+                ) {
+                    chosen = retried
+                    logger.info("Detected a newer clipboard candidate on retry ${attempt + 1} for $trigger")
+                    return@repeat
+                }
+            }
+        }
+
+        if (forceResend && chosen.event.contentHashSha256 == lastQueuedLocalHash) {
+            logger.warn("Manual sync skipped because the clipboard still matches the previously queued item after retries")
+            return
+        }
+
+        syncNormalizedIfNeeded(chosen, trigger, forceResend)
+    }
+
+    private suspend fun readCurrentClipboard(
+        trigger: String,
+        logUnavailableReason: Boolean,
+        logSnapshot: Boolean
+    ): NormalizedClipboard? {
+        val normalized = runCatching {
+            clipboardNormalizer.normalizeCurrentClipboard(logSnapshot = logSnapshot)
+        }.getOrElse {
+            logger.error("Failed to read clipboard for $trigger", it)
+            return null
+        }
+        if (normalized == null && logUnavailableReason) {
+            val message = if (uiForeground) {
+                "Manual sync could not find a supported clipboard item to send"
+            } else {
+                "Manual sync could not read clipboard while the app was hidden. Android may block background clipboard reads."
+            }
+            logger.warn(message)
+        }
+        return normalized
+    }
+
+    private fun syncNormalizedIfNeeded(
+        normalized: NormalizedClipboard,
+        trigger: String,
+        forceResend: Boolean
+    ) {
+        if (isPrivacyPaused()) {
+            logger.warn("Skipped outbound sync because privacy pause is enabled")
+            return
+        }
+
+        val hash = normalized.event.contentHashSha256
+        if (loopGuard.shouldSuppressLocal(hash)) {
+            logger.info("Suppressed clipboard echo for ${normalized.event.eventId}")
+            return
+        }
+        if (!forceResend && lastQueuedLocalHash == hash) {
+            logger.info("Skipped unchanged Android clipboard on $trigger")
+            return
+        }
+
+        enqueueOutbound(normalized)
+        lastQueuedLocalHash = hash
+        lastLocalClipboardAt = Instant.now()
+        addRecent(normalized, "Android -> Windows", "Queued")
+        logger.info("Queued Android clipboard event ${normalized.event.eventId} from $trigger")
+        flushQueue()
+    }
+
+    private fun updateScreenshotObserver() {
+        screenshotRepository.stopObserving(screenshotObserver)
+        screenshotObserver = null
+
+        if (!isAutoScreenshotSyncEnabled() || !isSyncEnabled()) {
+            return
+        }
+
+        screenshotObserver = screenshotRepository.observe(scope) {
+            if (!isPrivacyPaused()) {
+                scope.launch {
+                    syncLatestScreenshotIfNeeded("media-observer")
+                }
+            }
+        }
+    }
+
+    private suspend fun syncLatestScreenshotIfNeeded(trigger: String, force: Boolean = false) {
+        val screenshot = screenshotRepository.latestScreenshot() ?: run {
+            logger.warn("No recent screenshot found for $trigger")
+            return
+        }
+        if (!force && screenshot.id == lastSyncedScreenshotId) {
+            logger.info("Skipped already synced screenshot ${screenshot.displayName}")
+            return
+        }
+
+        val cached = imageCacheStore.cacheClipboardImage(screenshot.uri) ?: run {
+            logger.warn("Failed to cache screenshot ${screenshot.uri}")
+            return
+        }
+        val (image, bytes) = cached
+        val sourceDeviceId = localDeviceIdentityStore.deviceId
+        val normalized = NormalizedClipboard(
+            event = ClipboardEvent(
+                eventId = CryptoUtils.uuidV7(),
+                sourceDeviceId = sourceDeviceId,
+                contentType = ContentType.IMAGE,
+                mimeType = "image/png",
+                payloadSizeBytes = image.byteSize,
+                contentHashSha256 = image.checksumSha256,
+                dedupeKey = "$sourceDeviceId:${image.checksumSha256}",
+                transferState = TransferState.QUEUED,
+                image = ImageMetadata(
+                    width = image.width,
+                    height = image.height,
+                    byteSize = image.byteSize,
+                    checksumSha256 = image.checksumSha256,
+                    encoding = "png",
+                    transferId = CryptoUtils.uuidV7()
+                )
+            ),
+            imageBytes = bytes,
+            previewText = "Screenshot ${image.width}x${image.height}",
+            previewUri = image.uri.toString()
+        )
+
+        lastSyncedScreenshotId = screenshot.id
+        prefs.edit().putLong(KEY_LAST_SCREENSHOT_ID, screenshot.id).apply()
+        logger.info("Queued latest screenshot from $trigger: ${screenshot.displayName}")
+        syncNormalizedIfNeeded(normalized, trigger, forceResend = true)
+    }
+
+    private suspend fun syncLatestScreenshotToClipboardIfAvailable(trigger: String): Boolean {
+        val screenshot = screenshotRepository.latestScreenshot(maxAgeMillis = SMART_SYNC_SCREENSHOT_MAX_AGE_MILLIS) ?: return false
+        val cached = imageCacheStore.cacheClipboardImage(screenshot.uri) ?: run {
+            logger.warn("Failed to cache screenshot ${screenshot.uri} for smart sync")
+            return false
+        }
+        val (image, bytes) = cached
+        clipboardManager.setPrimaryClip(
+            ClipData.newUri(
+                appContext.contentResolver,
+                "Latest screenshot",
+                image.uri
+            )
+        )
+
+        val sourceDeviceId = localDeviceIdentityStore.deviceId
+        val normalized = NormalizedClipboard(
+            event = ClipboardEvent(
+                eventId = CryptoUtils.uuidV7(),
+                sourceDeviceId = sourceDeviceId,
+                contentType = ContentType.IMAGE,
+                mimeType = "image/png",
+                payloadSizeBytes = image.byteSize,
+                contentHashSha256 = image.checksumSha256,
+                dedupeKey = "$sourceDeviceId:${image.checksumSha256}",
+                transferState = TransferState.QUEUED,
+                image = ImageMetadata(
+                    width = image.width,
+                    height = image.height,
+                    byteSize = image.byteSize,
+                    checksumSha256 = image.checksumSha256,
+                    encoding = "png",
+                    transferId = CryptoUtils.uuidV7()
+                )
+            ),
+            imageBytes = bytes,
+            previewText = "Screenshot ${image.width}x${image.height}",
+            previewUri = image.uri.toString()
+        )
+
+        lastSyncedScreenshotId = screenshot.id
+        prefs.edit().putLong(KEY_LAST_SCREENSHOT_ID, screenshot.id).apply()
+        logger.info("Copied latest screenshot to clipboard and queued it from $trigger: ${screenshot.displayName}")
+        syncNormalizedIfNeeded(normalized, trigger, forceResend = true)
+        return true
     }
 
     private fun addRecent(normalized: NormalizedClipboard, direction: String, status: String) {
@@ -553,6 +928,27 @@ class SyncRepository(
     private companion object {
         private const val KEY_SYNC_ENABLED = "sync_enabled"
         private const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
+        private const val KEY_AUTO_SCREENSHOT_SYNC_ENABLED = "auto_screenshot_sync_enabled"
+        private const val KEY_PRIVACY_PAUSED = "privacy_paused"
+        private const val KEY_LAST_SCREENSHOT_ID = "last_screenshot_id"
         private const val CONFLICT_WINDOW_MILLIS = 1_500L
+        private const val CLIPBOARD_REFRESH_RETRY_COUNT = 4
+        private const val CLIPBOARD_REFRESH_RETRY_DELAY_MS = 300L
+        private const val SMART_SYNC_SCREENSHOT_MAX_AGE_MILLIS = 5 * 60 * 1000L
+    }
+
+    private fun buildSavedDeviceModels(): List<SavedDeviceUiModel> {
+        val selected = trustedDeviceRepository.getTrustedPeer()
+        val connected = lanClient.state.value == LanConnectionState.READY
+        return trustedDeviceRepository.getTrustedPeers().map { peer ->
+            SavedDeviceUiModel(
+                deviceId = peer.deviceId,
+                displayName = peer.displayName,
+                endpoint = "${peer.host}:${peer.port}",
+                selected = peer.deviceId == selected?.deviceId,
+                available = peer.deviceId in availablePeerIds || (peer.deviceId == selected?.deviceId && connected),
+                connected = peer.deviceId == selected?.deviceId && connected
+            )
+        }.sortedWith(compareByDescending<SavedDeviceUiModel> { it.connected }.thenByDescending { it.available }.thenBy { it.displayName })
     }
 }

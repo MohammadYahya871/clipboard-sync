@@ -14,6 +14,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
@@ -85,7 +86,42 @@
                 </Border>
             </UniformGrid>
 
-            <Grid Grid.Row="2" Margin="0,18,0,0">
+            <Border Grid.Row="2"
+                    Margin="0,18,0,0"
+                    Padding="16"
+                    CornerRadius="16"
+                    Background="#F7FAFD">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock Text="Saved Devices"
+                                   FontSize="16"
+                                   FontWeight="Bold" />
+                        <Button DockPanel.Dock="Right"
+                                Padding="12,6"
+                                HorizontalAlignment="Right"
+                                Content="Use Selected"
+                                Command="{Binding ConnectSavedDeviceCommand}" />
+                    </DockPanel>
+                    <TextBlock Margin="0,6,0,10"
+                               Text="Saved Android devices appear here after they authenticate. Select a device to prefer it when multiple phones have paired."
+                               TextWrapping="Wrap" />
+                    <ListView MinHeight="96"
+                              MaxHeight="160"
+                              ItemsSource="{Binding SavedDevices}"
+                              SelectedItem="{Binding SelectedSavedDevice, Mode=TwoWay}">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Device" DisplayMemberBinding="{Binding DisplayName}" Width="220" />
+                                <GridViewColumn Header="Status" DisplayMemberBinding="{Binding Status}" Width="120" />
+                                <GridViewColumn Header="Selected" DisplayMemberBinding="{Binding Selected}" Width="90" />
+                                <GridViewColumn Header="Last Seen" DisplayMemberBinding="{Binding LastSeenUtc}" Width="260" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Row="3" Margin="0,18,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="*" />
@@ -136,7 +172,7 @@
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="3" Margin="0,18,0,0">
+            <Grid Grid.Row="4" Margin="0,18,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -176,7 +212,7 @@
                 </GroupBox>
             </Grid>
 
-            <Border Grid.Row="4"
+            <Border Grid.Row="5"
                     Margin="0,18,0,0"
                     Padding="16"
                     CornerRadius="16"

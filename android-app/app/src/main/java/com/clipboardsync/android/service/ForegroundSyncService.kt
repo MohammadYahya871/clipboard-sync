@@ -24,7 +24,8 @@ class ForegroundSyncService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         repository.setServiceActive(true)
         when (intent?.action) {
-            ACTION_SYNC_NOW -> repository.syncCurrentClipboardNow("notification-action")
+            ACTION_SYNC_SMART -> repository.syncSmartNow("quick-settings")
+            ACTION_PAUSE_PRIVACY -> repository.setPrivacyPaused(true)
         }
         return START_STICKY
     }
@@ -37,7 +38,8 @@ class ForegroundSyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        const val ACTION_SYNC_NOW = "com.clipboardsync.android.action.SYNC_NOW"
+        const val ACTION_SYNC_SMART = "com.clipboardsync.android.action.SYNC_SMART"
+        const val ACTION_PAUSE_PRIVACY = "com.clipboardsync.android.action.PAUSE_PRIVACY"
 
         fun sync(context: Context) {
             ContextCompat.startForegroundService(
@@ -49,7 +51,7 @@ class ForegroundSyncService : Service() {
         fun syncNow(context: Context) {
             ContextCompat.startForegroundService(
                 context,
-                Intent(context, ForegroundSyncService::class.java).setAction(ACTION_SYNC_NOW)
+                Intent(context, ForegroundSyncService::class.java).setAction(ACTION_SYNC_SMART)
             )
         }
 

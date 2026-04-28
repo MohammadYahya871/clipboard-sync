@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClipboardSync.App.Util;
 
 namespace ClipboardSync.App.Models;
 
@@ -82,6 +83,19 @@ public sealed record PairingPayload(
     string CertificateSha256
 );
 
+public sealed record DiscoveryMessage(
+    string Type,
+    string? DeviceId = null,
+    string? DisplayName = null,
+    string? ServiceName = null,
+    string? Host = null,
+    int? Port = null,
+    string? CertificateSha256 = null)
+{
+    public const string DiscoverType = "clipboard_sync_discover";
+    public const string ResponseType = "clipboard_sync_device";
+}
+
 public sealed record NormalizedClipboardItem(
     ClipboardEvent Event,
     byte[]? ImageBytes,
@@ -101,6 +115,37 @@ public sealed class RecentClipboardItem
     public required string DirectionLabel { get; init; }
     public required TransferState TransferState { get; set; }
     public required string Status { get; set; }
+}
+
+public sealed class SavedDeviceItem : ObservableObject
+{
+    private bool _selected;
+    private bool _available;
+    private bool _connected;
+
+    public required string DeviceId { get; init; }
+    public required string DisplayName { get; set; }
+    public required string LastSeenUtc { get; set; }
+
+    public bool Selected
+    {
+        get => _selected;
+        set => SetProperty(ref _selected, value);
+    }
+
+    public bool Available
+    {
+        get => _available;
+        set => SetProperty(ref _available, value);
+    }
+
+    public bool Connected
+    {
+        get => _connected;
+        set => SetProperty(ref _connected, value);
+    }
+
+    public string Status => Connected ? "Connected" : Available ? "Available" : Selected ? "Selected" : "Saved";
 }
 
 public static class ProtocolJson

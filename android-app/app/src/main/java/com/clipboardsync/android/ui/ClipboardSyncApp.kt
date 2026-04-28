@@ -41,6 +41,7 @@ import coil.compose.AsyncImage
 import com.clipboardsync.android.protocol.ContentType
 import com.clipboardsync.android.protocol.TransportKind
 import com.clipboardsync.android.service.RecentItemUiModel
+import com.clipboardsync.android.service.SavedDeviceUiModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,14 +72,25 @@ fun ClipboardSyncApp(
                     transport = state.transportKind,
                     syncEnabled = state.syncEnabled,
                     notificationEnabled = state.notificationEnabled,
+                    autoScreenshotSyncEnabled = state.autoScreenshotSyncEnabled,
+                    privacyPaused = state.privacyPaused,
                     onSyncEnabledChanged = viewModel::onSyncEnabledChanged,
                     onNotificationEnabledChanged = onNotificationEnabledToggle,
+                    onAutoScreenshotSyncChanged = viewModel::onAutoScreenshotSyncChanged,
+                    onPrivacyPausedChanged = viewModel::onPrivacyPausedChanged,
                     onReconnect = viewModel::onReconnect,
-                    onSyncCurrentClipboard = viewModel::onSyncCurrentClipboard
+                    onSyncSmart = viewModel::onSyncSmart
                 )
             }
             item {
                 GuidanceCard(state.guidance)
+            }
+            item {
+                SavedDevicesCard(
+                    devices = state.savedDevices,
+                    onScan = viewModel::onScanSavedDevices,
+                    onSelect = viewModel::onSelectSavedDevice
+                )
             }
             item {
                 PairingCard(
@@ -94,7 +106,7 @@ fun ClipboardSyncApp(
                 SectionTitle("Recent sync history")
             }
             items(state.recentItems, key = { it.eventId }) { item ->
-                RecentItemCard(item)
+                RecentItemCard(item, onResend = { viewModel.onResendRecent(item.eventId) })
             }
             item {
                 Row(
@@ -105,6 +117,9 @@ fun ClipboardSyncApp(
                     SectionTitle("Diagnostics")
                     Button(onClick = viewModel::onClearLogs) {
                         Text("Clear")
+                    }
+                    Button(onClick = viewModel::onCopyDebugReport) {
+                        Text("Copy report")
                     }
                 }
             }
@@ -127,16 +142,86 @@ fun ClipboardSyncApp(
 }
 
 @Composable
+private fun SavedDevicesCard(
+    devices: List<SavedDeviceUiModel>,
+    onScan: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SectionTitle("Saved devices")
+                Button(onClick = onScan) {
+                    Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
+                    Text("Scan", modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+            if (devices.isEmpty()) {
+                Text("No saved Windows devices yet. Pair once with the payload below, then this list will work like Bluetooth devices.")
+            } else {
+                devices.forEach { device ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (device.selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(device.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(device.endpoint, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    when {
+                                        device.connected -> "Connected"
+                                        device.available -> "Available"
+                                        device.selected -> "Selected"
+                                        else -> "Saved"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            Button(onClick = { onSelect(device.deviceId) }) {
+                                Text(if (device.selected) "Reconnect" else "Connect")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatusCard(
     pairedDevice: String,
     connectionLabel: String,
     transport: TransportKind,
     syncEnabled: Boolean,
     notificationEnabled: Boolean,
+    autoScreenshotSyncEnabled: Boolean,
+    privacyPaused: Boolean,
     onSyncEnabledChanged: (Boolean) -> Unit,
     onNotificationEnabledChanged: (Boolean) -> Unit,
+    onAutoScreenshotSyncChanged: (Boolean) -> Unit,
+    onPrivacyPausedChanged: (Boolean) -> Unit,
     onReconnect: () -> Unit,
-    onSyncCurrentClipboard: () -> Unit
+    onSyncSmart: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -171,6 +256,28 @@ private fun StatusCard(
                 }
                 Switch(checked = notificationEnabled, onCheckedChange = onNotificationEnabledChanged)
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Auto-sync screenshots", style = MaterialTheme.typography.labelLarge)
+                    Text("Sends new screenshots from MediaStore without using the keyboard clipboard.", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = autoScreenshotSyncEnabled, onCheckedChange = onAutoScreenshotSyncChanged)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Privacy pause", style = MaterialTheme.typography.labelLarge)
+                    Text("Temporarily stops outbound clipboard and screenshot sync.", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = privacyPaused, onCheckedChange = onPrivacyPausedChanged)
+            }
             Text("Connection: $connectionLabel")
             Text(
                 "Transport: ${
@@ -193,11 +300,11 @@ private fun StatusCard(
                     Text("Reconnect", modifier = Modifier.padding(start = 8.dp))
                 }
                 Button(
-                    onClick = onSyncCurrentClipboard,
+                    onClick = onSyncSmart,
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Outlined.ContentPasteSearch, contentDescription = null)
-                    Text("Sync clipboard", modifier = Modifier.padding(start = 8.dp))
+                    Text("Sync screenshot or clipboard", modifier = Modifier.padding(start = 8.dp))
                 }
             }
         }
@@ -271,7 +378,7 @@ private fun LastItemCard(item: RecentItemUiModel?) {
 }
 
 @Composable
-private fun RecentItemCard(item: RecentItemUiModel) {
+private fun RecentItemCard(item: RecentItemUiModel, onResend: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -279,6 +386,9 @@ private fun RecentItemCard(item: RecentItemUiModel) {
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             RecentItemBody(item)
+            Button(onClick = onResend, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Resend")
+            }
         }
     }
 }

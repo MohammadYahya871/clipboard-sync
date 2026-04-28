@@ -16,8 +16,17 @@ public sealed class AppSettings
     public int Port { get; set; } = 43871;
     public string PairingCode { get; set; } = CryptoUtils.RandomBase64(18);
     public PairingPayload? TrustedPeer { get; set; }
+    public List<SavedPeer> SavedPeers { get; set; } = [];
+    public string? SelectedPeerDeviceId { get; set; }
     public string CertificatePath { get; set; } = "server-cert.pfx";
     public string CertificatePassword { get; set; } = CryptoUtils.RandomBase64(18);
+}
+
+public sealed class SavedPeer
+{
+    public required string DeviceId { get; set; }
+    public string DisplayName { get; set; } = "Android device";
+    public string LastSeenUtc { get; set; } = DateTimeOffset.UtcNow.ToString("O");
 }
 
 public sealed class TrustedDeviceStore
@@ -68,6 +77,41 @@ public sealed class TrustedDeviceStore
         Current.PairingCode = CryptoUtils.RandomBase64(18);
         Save();
         _logStore.Warn("Regenerated Windows pairing code");
+    }
+
+    public void RememberPeer(string deviceId, string displayName)
+    {
+        var existing = Current.SavedPeers.FirstOrDefault(peer => peer.DeviceId == deviceId);
+        if (existing is null)
+        {
+            Current.SavedPeers.Add(new SavedPeer
+            {
+                DeviceId = deviceId,
+                DisplayName = displayName,
+                LastSeenUtc = DateTimeOffset.UtcNow.ToString("O")
+            });
+            _logStore.Info($"Saved trusted connection for {displayName} ({deviceId})");
+        }
+        else
+        {
+            existing.DisplayName = displayName;
+            existing.LastSeenUtc = DateTimeOffset.UtcNow.ToString("O");
+        }
+
+        Current.SelectedPeerDeviceId ??= deviceId;
+        Save();
+    }
+
+    public void SelectPeer(string deviceId)
+    {
+        if (Current.SavedPeers.All(peer => peer.DeviceId != deviceId))
+        {
+            return;
+        }
+
+        Current.SelectedPeerDeviceId = deviceId;
+        Save();
+        _logStore.Info($"Selected saved device {deviceId}");
     }
 
     private AppSettings Load()

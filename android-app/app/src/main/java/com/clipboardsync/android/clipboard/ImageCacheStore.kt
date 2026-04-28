@@ -83,6 +83,13 @@ class ImageCacheStore(
     }
 
     private fun decodeClipboardBitmap(uri: Uri): Bitmap? {
+        decodeWithImageDecoder(uri)?.let { return it }
+        decodeWithTypedAsset(uri)?.let { return it }
+        decodeWithInputStream(uri)?.let { return it }
+        return null
+    }
+
+    private fun decodeWithImageDecoder(uri: Uri): Bitmap? {
         val source = runCatching {
             ImageDecoder.createSource(context.contentResolver, uri)
         }.getOrElse {
@@ -99,7 +106,25 @@ class ImageCacheStore(
                     logger.warn("Downsampling large clipboard image from $longestSide px using sample size $sampleSize")
                 }
             }
-        }.recoverCatching {
+        }.onFailure {
+            logger.warn("ImageDecoder failed for clipboard URI $uri: ${it.message}")
+        }.getOrNull()
+    }
+
+    private fun decodeWithTypedAsset(uri: Uri): Bitmap? {
+        return runCatching {
+            context.contentResolver.openTypedAssetFileDescriptor(uri, "image/*", null).use { descriptor ->
+                descriptor?.createInputStream().use { input ->
+                    BitmapFactory.decodeStream(input)
+                }
+            }
+        }.onFailure {
+            logger.warn("Typed image stream decode failed for clipboard URI $uri: ${it.message}")
+        }.getOrNull()
+    }
+
+    private fun decodeWithInputStream(uri: Uri): Bitmap? {
+        return runCatching {
             context.contentResolver.openInputStream(uri).use { input ->
                 BitmapFactory.decodeStream(input)
             }

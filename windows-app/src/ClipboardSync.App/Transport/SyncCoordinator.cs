@@ -26,6 +26,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
     private readonly Queue<PendingEvent> _outboundQueue = new();
     private readonly X509Certificate2 _certificate;
     private readonly LanServer _lanServer;
+    private readonly LanDiscoveryResponder _lanDiscoveryResponder;
 
     private ClipboardMonitor? _clipboardMonitor;
     private string _currentChallenge = string.Empty;
@@ -34,6 +35,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
     private string _connectionLabel = "Starting";
     private string _transportLabel = "Wi-Fi / LAN";
     private string _lastItemSummary = "No clipboard item synced yet.";
+    private string? _connectedPeerDeviceId;
     private DateTimeOffset _lastLocalClipboardAt = DateTimeOffset.MinValue;
     private bool _authenticated;
 
@@ -44,19 +46,29 @@ public sealed class SyncCoordinator : IAsyncDisposable
         _certificateManager = new CertificateManager(_settingsStore);
         _certificate = _certificateManager.GetOrCreateCertificate();
         _clipboardExtractor = new ClipboardExtractor(_settingsStore.Current.DeviceId);
+        var certificateSha256 = CertificateManager.Sha256ThumbprintHex(_certificate);
         _lanServer = new LanServer(_certificate, _settingsStore.Current.Port, _logStore);
+        _lanDiscoveryResponder = new LanDiscoveryResponder(
+            _settingsStore,
+            _logStore,
+            () => CurrentLanAddress,
+            certificateSha256);
         _lanServer.ConnectionStateChanged += (_, state) =>
         {
             _connectionLabel = state;
             if (state != "Connected")
             {
                 _authenticated = false;
+                _connectedPeerDeviceId = null;
             }
+            RefreshSavedDevices();
             OnStateChanged();
         };
     }
 
     public ObservableCollection<RecentClipboardItem> RecentItems { get; } = [];
+
+    public ObservableCollection<SavedDeviceItem> SavedDevices { get; } = [];
 
     public ObservableCollection<LogEntry> LogEntries => _logStore.Entries;
 
@@ -101,8 +113,10 @@ public sealed class SyncCoordinator : IAsyncDisposable
         _clipboardMonitor = new ClipboardMonitor();
         _clipboardMonitor.ClipboardUpdated += OnClipboardUpdated;
         _connectionLabel = "Listening";
+        RefreshSavedDevices();
         OnStateChanged();
         await _lanServer.StartAsync(HandleEnvelopeAsync, _cts.Token);
+        await _lanDiscoveryResponder.StartAsync(_cts.Token);
         _logStore.Info($"Selected LAN address {CurrentLanAddress} for pairing payloads");
         _logStore.Info("Sync coordinator initialized");
     }
@@ -148,6 +162,20 @@ public sealed class SyncCoordinator : IAsyncDisposable
     public void ManualReconnect()
     {
         _connectionLabel = _lanServer.HasClient ? "Connected" : "Listening";
+        RefreshSavedDevices();
+        OnStateChanged();
+    }
+
+    public void SelectSavedDevice(SavedDeviceItem? device)
+    {
+        if (device is null)
+        {
+            return;
+        }
+
+        _settingsStore.SelectPeer(device.DeviceId);
+        _pairedDeviceLabel = device.DisplayName;
+        RefreshSavedDevices();
         OnStateChanged();
     }
 
@@ -160,6 +188,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
     {
         _clipboardMonitor?.Dispose();
         _cts.Cancel();
+        await _lanDiscoveryResponder.DisposeAsync();
         await _lanServer.DisposeAsync();
         _cts.Dispose();
     }
@@ -332,6 +361,9 @@ public sealed class SyncCoordinator : IAsyncDisposable
         _authenticated = true;
         _pairedDeviceLabel = claimedDeviceId;
         _connectionLabel = "Connected";
+        _connectedPeerDeviceId = claimedDeviceId;
+        _settingsStore.RememberPeer(claimedDeviceId, claimedDeviceId);
+        RefreshSavedDevices();
         await _lanServer.SendAsync(new ProtocolEnvelope(
             "peer_status",
             DateTimeOffset.UtcNow.ToString("O"),
@@ -496,6 +528,27 @@ public sealed class SyncCoordinator : IAsyncDisposable
     private void OnStateChanged()
     {
         StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RefreshSavedDevices()
+    {
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            SavedDevices.Clear();
+            foreach (var peer in _settingsStore.Current.SavedPeers.OrderBy(peer => peer.DisplayName))
+            {
+                var connected = peer.DeviceId == _connectedPeerDeviceId && _authenticated;
+                SavedDevices.Add(new SavedDeviceItem
+                {
+                    DeviceId = peer.DeviceId,
+                    DisplayName = peer.DisplayName,
+                    LastSeenUtc = peer.LastSeenUtc,
+                    Selected = peer.DeviceId == _settingsStore.Current.SelectedPeerDeviceId,
+                    Available = connected,
+                    Connected = connected
+                });
+            }
+        });
     }
 
     private string CurrentLanAddress => CertificateManager.GetPreferredLanAddress();

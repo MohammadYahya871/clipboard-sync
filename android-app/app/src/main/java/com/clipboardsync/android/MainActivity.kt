@@ -38,6 +38,15 @@ class MainActivity : ComponentActivity() {
             repository.setNotificationEnabled(false)
         }
     }
+    private val mediaPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            (application as ClipboardSyncApplication).container.logger.warn(
+                "Image/media permission denied; automatic screenshot sync will not be able to read screenshots"
+            )
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +74,7 @@ class MainActivity : ComponentActivity() {
         viewModel.onUiForegroundChanged(true)
         clipboardObserver.start()
         maybeRequestNotificationPermission()
+        maybeRequestMediaPermission()
     }
 
     override fun onPause() {
@@ -88,5 +98,17 @@ class MainActivity : ComponentActivity() {
         }
 
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun maybeRequestMediaPermission() {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        mediaPermissionLauncher.launch(permission)
     }
 }

@@ -95,6 +95,22 @@ data class PairingPayload(
     val certificateSha256: String
 )
 
+@Serializable
+data class DiscoveryMessage(
+    val type: String,
+    val deviceId: String? = null,
+    val displayName: String? = null,
+    val serviceName: String? = null,
+    val host: String? = null,
+    val port: Int? = null,
+    val certificateSha256: String? = null
+) {
+    companion object {
+        const val DISCOVER_TYPE = "clipboard_sync_discover"
+        const val RESPONSE_TYPE = "clipboard_sync_device"
+    }
+}
+
 data class NormalizedClipboard(
     val event: ClipboardEvent,
     val imageBytes: ByteArray? = null,

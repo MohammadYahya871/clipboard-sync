@@ -9,6 +9,7 @@ namespace ClipboardSync.App.ViewModels;
 public sealed class MainViewModel : ObservableObject
 {
     private readonly SyncCoordinator _coordinator;
+    private SavedDeviceItem? _selectedSavedDevice;
 
     public MainViewModel(SyncCoordinator coordinator)
     {
@@ -25,10 +26,17 @@ public sealed class MainViewModel : ObservableObject
             _coordinator.ManualReconnect();
             RaiseAll();
         });
+        ConnectSavedDeviceCommand = new RelayCommand(() =>
+        {
+            _coordinator.SelectSavedDevice(SelectedSavedDevice);
+            RaiseAll();
+        });
         ClearLogsCommand = new RelayCommand(_coordinator.ClearLogs);
     }
 
     public ObservableCollection<RecentClipboardItem> RecentItems => _coordinator.RecentItems;
+
+    public ObservableCollection<SavedDeviceItem> SavedDevices => _coordinator.SavedDevices;
 
     public ObservableCollection<LogEntry> LogEntries => _coordinator.LogEntries;
 
@@ -56,11 +64,19 @@ public sealed class MainViewModel : ObservableObject
 
     public string LastItemSummary => _coordinator.LastItemSummary;
 
+    public SavedDeviceItem? SelectedSavedDevice
+    {
+        get => _selectedSavedDevice;
+        set => SetProperty(ref _selectedSavedDevice, value);
+    }
+
     public RelayCommand CopyPairingPayloadCommand { get; }
 
     public RelayCommand RegeneratePairingCodeCommand { get; }
 
     public RelayCommand ReconnectCommand { get; }
+
+    public RelayCommand ConnectSavedDeviceCommand { get; }
 
     public RelayCommand ClearLogsCommand { get; }
 
@@ -74,6 +90,7 @@ public sealed class MainViewModel : ObservableObject
         RaisePropertyChanged(nameof(TransportLabel));
         RaisePropertyChanged(nameof(PairingPayload));
         RaisePropertyChanged(nameof(LastItemSummary));
+        RaisePropertyChanged(nameof(SavedDevices));
     }
 }
 

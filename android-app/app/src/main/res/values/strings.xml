@@ -3,8 +3,8 @@
     <string name="service_channel_name">Clipboard sync service</string>
     <string name="service_channel_description">Keeps the LAN sync session alive while sync is enabled.</string>
     <string name="service_notification_title">Clipboard Sync active</string>
-    <string name="service_notification_text">Tap Sync now to push the current Android clipboard to Windows.</string>
-    <string name="service_notification_action_sync">Sync now</string>
+    <string name="service_notification_text">The background link is active. Use the Quick Settings tile to sync a fresh screenshot or the current clipboard.</string>
+    <string name="service_notification_action_pause">Pause</string>
     <string name="last_item_none">No clipboard item synced yet.</string>
     <string name="pairing_payload_hint">Paste pairing payload from Windows</string>
 </resources>
