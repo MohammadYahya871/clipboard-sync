@@ -132,6 +132,8 @@ class SyncRepository(
     private var lastQueuedLocalHash: String? = null
     private var reconnectJob: Job? = null
     private var discoveryConnectJob: Job? = null
+    private var flushJob: Job? = null
+    private var clipboardChangeJob: Job? = null
     private var availablePeerIds: Set<String> = emptySet()
     private var screenshotObserver: ContentObserver? = null
     private var lastSyncedScreenshotId: Long = prefs.getLong(KEY_LAST_SCREENSHOT_ID, -1L)
@@ -345,8 +347,10 @@ class SyncRepository(
         if (!uiForeground || !isSyncEnabled() || isPrivacyPaused()) {
             return
         }
-        scope.launch {
-            syncCurrentClipboardIfNeeded("clipboard-change")
+        clipboardChangeJob?.cancel()
+        clipboardChangeJob = scope.launch {
+            delay(CLIPBOARD_CHANGE_DEBOUNCE_MS)
+            syncCurrentClipboardWithRetryWindow("clipboard-change")
         }
     }
 
@@ -441,21 +445,36 @@ class SyncRepository(
     }
 
     private fun flushQueue() {
-        if (lanClient.state.value != LanConnectionState.READY) return
-        while (outboundQueue.isNotEmpty()) {
-            val pending = outboundQueue.removeFirst()
-            sendPending(pending)
+        if (lanClient.state.value != LanConnectionState.READY) {
+            if (outboundQueue.isNotEmpty() && isSyncEnabled()) {
+                ensureConnected()
+            }
+            return
+        }
+        if (flushJob?.isActive == true) return
+        flushJob = scope.launch {
+            while (outboundQueue.isNotEmpty() && lanClient.state.value == LanConnectionState.READY) {
+                val pending = outboundQueue.removeFirst()
+                sendPending(pending)
+            }
         }
     }
 
-    private fun sendPending(pending: PendingEvent) {
+    private suspend fun sendPending(pending: PendingEvent) {
         pending.attempts += 1
         pending.lastAttemptUtc = Instant.now()
         logger.info("Sending clipboard event ${pending.normalized.event.eventId}, attempt ${pending.attempts}")
-        lanClient.sendClipboardEvent(
+        val sent = lanClient.sendClipboardEvent(
             pending.normalized.event.copy(transferState = TransferState.AWAITING_ACK),
             pending.normalized.imageBytes
         )
+        if (!sent) {
+            logger.warn("LAN send was interrupted for ${pending.normalized.event.eventId}; it will retry after reconnect")
+            outboundQueue.addFirst(pending)
+            lanClient.disconnect()
+            scheduleReconnect()
+            return
+        }
         scheduleAckTimeout(pending.normalized.event.eventId)
     }
 
@@ -495,7 +514,11 @@ class SyncRepository(
         if (state == LanConnectionState.READY) {
             reconnectJob?.cancel()
             flushQueue()
-        } else if (state == LanConnectionState.FAILED && isSyncEnabled()) {
+        } else if ((state == LanConnectionState.FAILED || state == LanConnectionState.DISCONNECTED) &&
+            isSyncEnabled() &&
+            (uiForeground || serviceActive) &&
+            trustedDeviceRepository.getTrustedPeer() != null
+        ) {
             scheduleReconnect()
         }
     }
@@ -517,7 +540,7 @@ class SyncRepository(
             "transfer_chunk" -> handleTransferChunk(envelope)
             "transfer_complete" -> handleTransferComplete(envelope)
             "clipboard_ack" -> handleAck(envelope)
-            "clipboard_reject" -> logger.warn("Clipboard event rejected: ${envelope.reason}")
+            "clipboard_reject" -> handleReject(envelope)
             "ping" -> lanClient.sendEnvelope(ProtocolEnvelope(type = "pong"))
         }
     }
@@ -597,8 +620,20 @@ class SyncRepository(
     private fun handleAck(envelope: ProtocolEnvelope) {
         val eventId = envelope.event?.eventId ?: return
         pendingByEventId.remove(eventId)
-        updateRecentStatus(eventId, TransferState.ACKED, envelope.status ?: "Acked")
+        val status = envelope.status ?: "Acked"
+        val transferState = if (status == "deferred") TransferState.DEFERRED else TransferState.ACKED
+        updateRecentStatus(eventId, transferState, status.replaceFirstChar { it.uppercase() })
         logger.info("Event $eventId acked")
+    }
+
+    private fun handleReject(envelope: ProtocolEnvelope) {
+        val eventId = envelope.event?.eventId
+        val reason = envelope.reason ?: "Rejected"
+        logger.warn("Clipboard event rejected: $reason")
+        if (eventId != null) {
+            pendingByEventId.remove(eventId)
+            updateRecentStatus(eventId, TransferState.FAILED, reason)
+        }
     }
 
     private suspend fun applyRemoteEvent(event: ClipboardEvent, imageBytes: ByteArray?) {
@@ -932,6 +967,7 @@ class SyncRepository(
         private const val KEY_PRIVACY_PAUSED = "privacy_paused"
         private const val KEY_LAST_SCREENSHOT_ID = "last_screenshot_id"
         private const val CONFLICT_WINDOW_MILLIS = 1_500L
+        private const val CLIPBOARD_CHANGE_DEBOUNCE_MS = 250L
         private const val CLIPBOARD_REFRESH_RETRY_COUNT = 4
         private const val CLIPBOARD_REFRESH_RETRY_DELAY_MS = 300L
         private const val SMART_SYNC_SCREENSHOT_MAX_AGE_MILLIS = 5 * 60 * 1000L

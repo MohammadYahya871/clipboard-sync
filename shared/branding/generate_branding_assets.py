@@ -50,11 +50,17 @@ def write_android_vector(path: Path, path_data: str, fill: str, size_dp: int) ->
         f"""<vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="{size_dp}dp"
     android:height="{size_dp}dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="{fill}"
-        android:pathData="{path_data}" />
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="22"
+        android:translateY="22"
+        android:scaleX="2.6666667"
+        android:scaleY="2.6666667">
+        <path
+            android:fillColor="{fill}"
+            android:pathData="{path_data}" />
+    </group>
 </vector>
 """,
         encoding="utf-8",
@@ -112,8 +118,8 @@ def render_windows_icon(path_data: str) -> Image.Image:
       place-items: center;
     }}
     .glyph {{
-      width: 620px;
-      height: 620px;
+      width: 560px;
+      height: 560px;
       display: block;
     }}
   </style>

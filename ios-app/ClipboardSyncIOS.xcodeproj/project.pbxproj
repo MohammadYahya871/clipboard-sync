@@ -1,0 +1,515 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		000000000000000000000101 /* ClipboardSyncApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000201 /* ClipboardSyncApp.swift */; };
+		000000000000000000000102 /* SyncIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000202 /* SyncIntents.swift */; };
+		000000000000000000000103 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000203 /* ContentView.swift */; };
+		000000000000000000000104 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000204 /* QRScannerView.swift */; };
+		000000000000000000000105 /* ProtocolModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000205 /* ProtocolModels.swift */; };
+		000000000000000000000106 /* CryptoUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000206 /* CryptoUtils.swift */; };
+		000000000000000000000107 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000207 /* AppLogger.swift */; };
+		000000000000000000000108 /* TrustedDeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000208 /* TrustedDeviceStore.swift */; };
+		000000000000000000000109 /* LoopGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000209 /* LoopGuard.swift */; };
+		00000000000000000000010A /* ImageCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000020A /* ImageCacheStore.swift */; };
+		00000000000000000000010B /* ClipboardNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000020B /* ClipboardNormalizer.swift */; };
+		00000000000000000000010C /* ClipboardApplyUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000020C /* ClipboardApplyUseCase.swift */; };
+		00000000000000000000010D /* LanClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000020D /* LanClient.swift */; };
+		00000000000000000000010E /* PeerDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000020E /* PeerDiscovery.swift */; };
+		00000000000000000000010F /* ScreenshotRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000020F /* ScreenshotRepository.swift */; };
+		000000000000000000000110 /* SyncRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000210 /* SyncRepository.swift */; };
+		000000000000000000000111 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000211 /* ShareViewController.swift */; };
+		000000000000000000000112 /* ClipboardSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000212 /* ClipboardSyncTests.swift */; };
+		000000000000000000000113 /* ClipboardSyncShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 000000000000000000000301 /* ClipboardSyncShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		000000000000000000000401 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000000000501;
+			remoteInfo = ClipboardSyncShareExtension;
+		};
+		000000000000000000000402 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000000000500;
+			remoteInfo = ClipboardSync;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000000000601 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				000000000000000000000113 /* ClipboardSyncShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		000000000000000000000201 /* ClipboardSyncApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardSyncApp.swift; sourceTree = "<group>"; };
+		000000000000000000000202 /* SyncIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncIntents.swift; sourceTree = "<group>"; };
+		000000000000000000000203 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
+		000000000000000000000204 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/QRScannerView.swift; sourceTree = "<group>"; };
+		000000000000000000000205 /* ProtocolModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ProtocolModels.swift; sourceTree = "<group>"; };
+		000000000000000000000206 /* CryptoUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CryptoUtils.swift; sourceTree = "<group>"; };
+		000000000000000000000207 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppLogger.swift; sourceTree = "<group>"; };
+		000000000000000000000208 /* TrustedDeviceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/TrustedDeviceStore.swift; sourceTree = "<group>"; };
+		000000000000000000000209 /* LoopGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/LoopGuard.swift; sourceTree = "<group>"; };
+		00000000000000000000020A /* ImageCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ImageCacheStore.swift; sourceTree = "<group>"; };
+		00000000000000000000020B /* ClipboardNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ClipboardNormalizer.swift; sourceTree = "<group>"; };
+		00000000000000000000020C /* ClipboardApplyUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ClipboardApplyUseCase.swift; sourceTree = "<group>"; };
+		00000000000000000000020D /* LanClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/LanClient.swift; sourceTree = "<group>"; };
+		00000000000000000000020E /* PeerDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/PeerDiscovery.swift; sourceTree = "<group>"; };
+		00000000000000000000020F /* ScreenshotRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ScreenshotRepository.swift; sourceTree = "<group>"; };
+		000000000000000000000210 /* SyncRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/SyncRepository.swift; sourceTree = "<group>"; };
+		000000000000000000000211 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		000000000000000000000212 /* ClipboardSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardSyncTests.swift; sourceTree = "<group>"; };
+		000000000000000000000213 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		000000000000000000000214 /* ClipboardSync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClipboardSync.entitlements; sourceTree = "<group>"; };
+		000000000000000000000215 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		000000000000000000000216 /* ClipboardSyncShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClipboardSyncShareExtension.entitlements; sourceTree = "<group>"; };
+		000000000000000000000300 /* ClipboardSync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClipboardSync.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000301 /* ClipboardSyncShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClipboardSyncShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000302 /* ClipboardSyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClipboardSyncTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		000000000000000000000701 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		000000000000000000000702 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		000000000000000000000703 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		000000000000000000000800 = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000801 /* ClipboardSync */,
+				000000000000000000000802 /* ClipboardSyncShareExtension */,
+				000000000000000000000803 /* ClipboardSyncTests */,
+				000000000000000000000804 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		000000000000000000000801 /* ClipboardSync */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000201 /* ClipboardSyncApp.swift */,
+				000000000000000000000202 /* SyncIntents.swift */,
+				000000000000000000000203 /* ContentView.swift */,
+				000000000000000000000204 /* QRScannerView.swift */,
+				000000000000000000000205 /* ProtocolModels.swift */,
+				000000000000000000000206 /* CryptoUtils.swift */,
+				000000000000000000000207 /* AppLogger.swift */,
+				000000000000000000000208 /* TrustedDeviceStore.swift */,
+				000000000000000000000209 /* LoopGuard.swift */,
+				00000000000000000000020A /* ImageCacheStore.swift */,
+				00000000000000000000020B /* ClipboardNormalizer.swift */,
+				00000000000000000000020C /* ClipboardApplyUseCase.swift */,
+				00000000000000000000020D /* LanClient.swift */,
+				00000000000000000000020E /* PeerDiscovery.swift */,
+				00000000000000000000020F /* ScreenshotRepository.swift */,
+				000000000000000000000210 /* SyncRepository.swift */,
+				000000000000000000000213 /* Info.plist */,
+				000000000000000000000214 /* ClipboardSync.entitlements */,
+			);
+			path = ClipboardSync;
+			sourceTree = "<group>";
+		};
+		000000000000000000000802 /* ClipboardSyncShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000211 /* ShareViewController.swift */,
+				000000000000000000000215 /* Info.plist */,
+				000000000000000000000216 /* ClipboardSyncShareExtension.entitlements */,
+			);
+			path = ClipboardSyncShareExtension;
+			sourceTree = "<group>";
+		};
+		000000000000000000000803 /* ClipboardSyncTests */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000212 /* ClipboardSyncTests.swift */,
+			);
+			path = ClipboardSyncTests;
+			sourceTree = "<group>";
+		};
+		000000000000000000000804 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000300 /* ClipboardSync.app */,
+				000000000000000000000301 /* ClipboardSyncShareExtension.appex */,
+				000000000000000000000302 /* ClipboardSyncTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		000000000000000000000500 /* ClipboardSync */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000A00 /* Build configuration list for PBXNativeTarget "ClipboardSync" */;
+			buildPhases = (
+				000000000000000000000901 /* Sources */,
+				000000000000000000000701 /* Frameworks */,
+				000000000000000000000601 /* Embed App Extensions */,
+			);
+			buildRules = ();
+			dependencies = (
+				000000000000000000000403 /* PBXTargetDependency */,
+			);
+			name = ClipboardSync;
+			productName = ClipboardSync;
+			productReference = 000000000000000000000300 /* ClipboardSync.app */;
+			productType = "com.apple.product-type.application";
+		};
+		000000000000000000000501 /* ClipboardSyncShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000A01 /* Build configuration list for PBXNativeTarget "ClipboardSyncShareExtension" */;
+			buildPhases = (
+				000000000000000000000902 /* Sources */,
+				000000000000000000000702 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = ClipboardSyncShareExtension;
+			productName = ClipboardSyncShareExtension;
+			productReference = 000000000000000000000301 /* ClipboardSyncShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		000000000000000000000502 /* ClipboardSyncTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000A02 /* Build configuration list for PBXNativeTarget "ClipboardSyncTests" */;
+			buildPhases = (
+				000000000000000000000903 /* Sources */,
+				000000000000000000000703 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = (
+				000000000000000000000404 /* PBXTargetDependency */,
+			);
+			name = ClipboardSyncTests;
+			productName = ClipboardSyncTests;
+			productReference = 000000000000000000000302 /* ClipboardSyncTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		000000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					000000000000000000000500 = {CreatedOnToolsVersion = 15.0;};
+					000000000000000000000501 = {CreatedOnToolsVersion = 15.0;};
+					000000000000000000000502 = {CreatedOnToolsVersion = 15.0;};
+				};
+			};
+			buildConfigurationList = 000000000000000000000A03 /* Build configuration list for PBXProject "ClipboardSyncIOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = 000000000000000000000800;
+			productRefGroup = 000000000000000000000804 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				000000000000000000000500 /* ClipboardSync */,
+				000000000000000000000501 /* ClipboardSyncShareExtension */,
+				000000000000000000000502 /* ClipboardSyncTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		000000000000000000000901 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000101 /* ClipboardSyncApp.swift in Sources */,
+				000000000000000000000102 /* SyncIntents.swift in Sources */,
+				000000000000000000000103 /* ContentView.swift in Sources */,
+				000000000000000000000104 /* QRScannerView.swift in Sources */,
+				000000000000000000000105 /* ProtocolModels.swift in Sources */,
+				000000000000000000000106 /* CryptoUtils.swift in Sources */,
+				000000000000000000000107 /* AppLogger.swift in Sources */,
+				000000000000000000000108 /* TrustedDeviceStore.swift in Sources */,
+				000000000000000000000109 /* LoopGuard.swift in Sources */,
+				00000000000000000000010A /* ImageCacheStore.swift in Sources */,
+				00000000000000000000010B /* ClipboardNormalizer.swift in Sources */,
+				00000000000000000000010C /* ClipboardApplyUseCase.swift in Sources */,
+				00000000000000000000010D /* LanClient.swift in Sources */,
+				00000000000000000000010E /* PeerDiscovery.swift in Sources */,
+				00000000000000000000010F /* ScreenshotRepository.swift in Sources */,
+				000000000000000000000110 /* SyncRepository.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000902 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000111 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000903 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000112 /* ClipboardSyncTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		000000000000000000000403 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 000000000000000000000501 /* ClipboardSyncShareExtension */; targetProxy = 000000000000000000000401 /* PBXContainerItemProxy */; };
+		000000000000000000000404 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 000000000000000000000500 /* ClipboardSync */; targetProxy = 000000000000000000000402 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		000000000000000000000B00 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)");
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		000000000000000000000B01 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		000000000000000000000B10 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClipboardSync/ClipboardSync.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClipboardSync/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clipboardsync.ios;
+				PRODUCT_NAME = ClipboardSync;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		000000000000000000000B11 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClipboardSync/ClipboardSync.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClipboardSync/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clipboardsync.ios;
+				PRODUCT_NAME = ClipboardSync;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		000000000000000000000B20 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClipboardSyncShareExtension/ClipboardSyncShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClipboardSyncShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clipboardsync.ios.share;
+				PRODUCT_NAME = ClipboardSyncShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		000000000000000000000B21 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClipboardSyncShareExtension/ClipboardSyncShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClipboardSyncShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clipboardsync.ios.share;
+				PRODUCT_NAME = ClipboardSyncShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		000000000000000000000B30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clipboardsync.ios.tests;
+				PRODUCT_NAME = ClipboardSyncTests;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ClipboardSync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ClipboardSync";
+			};
+			name = Debug;
+		};
+		000000000000000000000B31 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clipboardsync.ios.tests;
+				PRODUCT_NAME = ClipboardSyncTests;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ClipboardSync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ClipboardSync";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		000000000000000000000A00 /* Build configuration list for PBXNativeTarget "ClipboardSync" */ = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000B10, 000000000000000000000B11); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000A01 /* Build configuration list for PBXNativeTarget "ClipboardSyncShareExtension" */ = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000B20, 000000000000000000000B21); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000A02 /* Build configuration list for PBXNativeTarget "ClipboardSyncTests" */ = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000B30, 000000000000000000000B31); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000A03 /* Build configuration list for PBXProject "ClipboardSyncIOS" */ = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000B00, 000000000000000000000B01); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 000000000000000000000001 /* Project object */;
+}

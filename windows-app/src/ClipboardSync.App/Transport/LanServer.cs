@@ -66,7 +66,22 @@ public sealed class LanServer : IAsyncDisposable
             _socket = socket;
             ConnectionStateChanged?.Invoke(this, "Connected");
             _logStore.Info("Android client connected to LAN WebSocket");
-            await ReceiveLoopAsync(socket, handler, cancellationToken);
+            try
+            {
+                await ReceiveLoopAsync(socket, handler, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                _logStore.Info("LAN WebSocket receive loop canceled");
+            }
+            catch (WebSocketException exception)
+            {
+                _logStore.Warn($"LAN WebSocket closed unexpectedly: {exception.Message}");
+            }
+            catch (Exception exception)
+            {
+                _logStore.Error("LAN WebSocket receive loop failed", exception);
+            }
             _socket = null;
             ConnectionStateChanged?.Invoke(this, "Disconnected");
             _logStore.Warn("Android client disconnected from LAN WebSocket");
@@ -88,7 +103,16 @@ public sealed class LanServer : IAsyncDisposable
 
         _logStore.Info($"Sending envelope {envelope.Type}");
         var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, ProtocolJson.Options));
-        await _socket.SendAsync(payload, WebSocketMessageType.Text, true, cancellationToken);
+        try
+        {
+            await _socket.SendAsync(payload, WebSocketMessageType.Text, true, cancellationToken);
+        }
+        catch (Exception exception) when (exception is WebSocketException or InvalidOperationException or OperationCanceledException)
+        {
+            _logStore.Warn($"Failed to send envelope {envelope.Type}: {exception.Message}");
+            _socket = null;
+            ConnectionStateChanged?.Invoke(this, "Disconnected");
+        }
     }
 
     public async Task SendClipboardEventAsync(ClipboardEvent clipboardEvent, byte[]? imageBytes, CancellationToken cancellationToken = default)
@@ -166,12 +190,19 @@ public sealed class LanServer : IAsyncDisposable
                 continue;
             }
 
-            var json = Encoding.UTF8.GetString(stream.ToArray());
-            var envelope = JsonSerializer.Deserialize<ProtocolEnvelope>(json, ProtocolJson.Options);
-            if (envelope is not null)
+            try
             {
-                _logStore.Info($"Received envelope {envelope.Type}");
-                await handler(envelope);
+                var json = Encoding.UTF8.GetString(stream.ToArray());
+                var envelope = JsonSerializer.Deserialize<ProtocolEnvelope>(json, ProtocolJson.Options);
+                if (envelope is not null)
+                {
+                    _logStore.Info($"Received envelope {envelope.Type}");
+                    await handler(envelope);
+                }
+            }
+            catch (JsonException exception)
+            {
+                _logStore.Warn($"Ignored malformed LAN envelope: {exception.Message}");
             }
         }
     }

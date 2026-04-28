@@ -1,8 +1,12 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ClipboardSync.App.Diagnostics;
 using ClipboardSync.App.Models;
 using ClipboardSync.App.Transport;
 using ClipboardSync.App.Util;
+using QRCoder;
 
 namespace ClipboardSync.App.ViewModels;
 
@@ -62,6 +66,8 @@ public sealed class MainViewModel : ObservableObject
 
     public string PairingPayload => _coordinator.PairingPayload;
 
+    public ImageSource PairingQrCodeImage => CreateQrCodeImage(PairingPayload);
+
     public string LastItemSummary => _coordinator.LastItemSummary;
 
     public SavedDeviceItem? SelectedSavedDevice
@@ -89,8 +95,26 @@ public sealed class MainViewModel : ObservableObject
         RaisePropertyChanged(nameof(ConnectionLabel));
         RaisePropertyChanged(nameof(TransportLabel));
         RaisePropertyChanged(nameof(PairingPayload));
+        RaisePropertyChanged(nameof(PairingQrCodeImage));
         RaisePropertyChanged(nameof(LastItemSummary));
         RaisePropertyChanged(nameof(SavedDevices));
+    }
+
+    private static ImageSource CreateQrCodeImage(string payload)
+    {
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
+        var qrCode = new PngByteQRCode(data);
+        var bytes = qrCode.GetGraphic(14);
+
+        using var stream = new MemoryStream(bytes);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 }
 

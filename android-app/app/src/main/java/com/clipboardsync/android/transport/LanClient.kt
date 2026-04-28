@@ -9,6 +9,7 @@ import com.clipboardsync.android.protocol.ProtocolJson
 import com.clipboardsync.android.protocol.TransferChunk
 import com.clipboardsync.android.protocol.TransferDescriptor
 import com.clipboardsync.android.storage.CryptoUtils
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,51 +118,80 @@ class LanClient(
         return webSocket?.send(encoded) == true
     }
 
-    fun sendClipboardEvent(event: ClipboardEvent, imageBytes: ByteArray?) {
-        sendEnvelope(ProtocolEnvelope(type = "clipboard_offer", event = event))
+    suspend fun sendClipboardEvent(event: ClipboardEvent, imageBytes: ByteArray?): Boolean {
+        if (!sendEnvelope(ProtocolEnvelope(type = "clipboard_offer", event = event))) {
+            logger.warn("Failed to queue clipboard offer ${event.eventId}")
+            return false
+        }
         if (event.image != null && imageBytes != null) {
-            val chunkSize = 32 * 1024
+            val chunkSize = 16 * 1024
             val totalChunks = (imageBytes.size + chunkSize - 1) / chunkSize
-            sendEnvelope(
+            val transferId = event.image.transferId ?: event.eventId
+            if (!sendEnvelope(
                 ProtocolEnvelope(
                     type = "transfer_begin",
                     transfer = TransferDescriptor(
-                        transferId = event.image.transferId ?: event.eventId,
+                        transferId = transferId,
                         eventId = event.eventId,
                         totalChunks = totalChunks,
                         totalBytes = imageBytes.size.toLong(),
                         checksumSha256 = event.image.checksumSha256
                     )
                 )
-            )
+            )) {
+                logger.warn("Failed to queue transfer begin for ${event.eventId}")
+                return false
+            }
             for (index in 0 until totalChunks) {
                 val start = index * chunkSize
                 val end = minOf(imageBytes.size, start + chunkSize)
                 val base64 = Base64.encodeToString(imageBytes.copyOfRange(start, end), Base64.NO_WRAP)
-                sendEnvelope(
+                if (!waitForQueueCapacity()) {
+                    logger.warn("Timed out waiting for LAN socket send queue while sending ${event.eventId}")
+                    return false
+                }
+                if (!sendEnvelope(
                     ProtocolEnvelope(
                         type = "transfer_chunk",
                         chunk = TransferChunk(
-                            transferId = event.image.transferId ?: event.eventId,
+                            transferId = transferId,
                             chunkIndex = index,
                             base64Payload = base64
                         )
                     )
-                )
+                )) {
+                    logger.warn("Failed to queue transfer chunk $index/$totalChunks for ${event.eventId}")
+                    return false
+                }
             }
-            sendEnvelope(
+            if (!sendEnvelope(
                 ProtocolEnvelope(
                     type = "transfer_complete",
                     transfer = TransferDescriptor(
-                        transferId = event.image.transferId ?: event.eventId,
+                        transferId = transferId,
                         eventId = event.eventId,
                         totalChunks = totalChunks,
                         totalBytes = imageBytes.size.toLong(),
                         checksumSha256 = event.image.checksumSha256
                     )
                 )
-            )
+            )) {
+                logger.warn("Failed to queue transfer complete for ${event.eventId}")
+                return false
+            }
         }
+        return true
+    }
+
+    private suspend fun waitForQueueCapacity(): Boolean {
+        repeat(200) {
+            val queuedBytes = webSocket?.queueSize() ?: return false
+            if (queuedBytes < MAX_SOCKET_QUEUE_BYTES) {
+                return true
+            }
+            delay(25)
+        }
+        return false
     }
 
     private class FingerprintTrustManager(
@@ -178,5 +208,9 @@ class LanClient(
         }
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    }
+
+    private companion object {
+        private const val MAX_SOCKET_QUEUE_BYTES = 8L * 1024L * 1024L
     }
 }

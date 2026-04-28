@@ -17,6 +17,8 @@ import com.clipboardsync.android.ui.ClipboardSyncViewModel
 import com.clipboardsync.android.ui.ClipboardSyncViewModelFactory
 import com.clipboardsync.android.ui.theme.ClipboardSyncTheme
 import androidx.core.content.ContextCompat
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<ClipboardSyncViewModel> {
@@ -47,6 +49,9 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+    private val pairingQrLauncher = registerForActivityResult(ScanContract()) { result ->
+        result.contents?.let { viewModel.onPair(it) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +63,7 @@ class MainActivity : ComponentActivity() {
             ClipboardSyncTheme {
                 ClipboardSyncApp(
                     viewModel = viewModel,
+                    onScanPairingQr = ::scanPairingQr,
                     onNotificationEnabledToggle = { enabled ->
                         viewModel.onNotificationEnabledChanged(enabled)
                         if (enabled) {
@@ -110,5 +116,14 @@ class MainActivity : ComponentActivity() {
             return
         }
         mediaPermissionLauncher.launch(permission)
+    }
+
+    private fun scanPairingQr() {
+        val options = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Scan the Clipboard Sync QR code on Windows")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+        pairingQrLauncher.launch(options)
     }
 }

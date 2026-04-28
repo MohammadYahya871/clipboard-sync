@@ -21,7 +21,7 @@ class NotificationSyncActivity : ComponentActivity() {
 
         startedSync = true
         val repository = (application as ClipboardSyncApplication).container.syncRepository
-        repository.syncCurrentClipboardNow("notification-activity")
+        repository.syncSmartNow("foreground-sync-activity")
 
         lifecycleScope.launch {
             delay(450)

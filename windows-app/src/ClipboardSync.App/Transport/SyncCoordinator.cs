@@ -389,6 +389,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
         if (_loopGuard.HasSeenEvent(clipboardEvent.EventId))
         {
             _logStore.Info($"Ignoring already seen remote event {clipboardEvent.EventId}");
+            await SendClipboardAckAsync(clipboardEvent, "duplicate");
             return;
         }
 
@@ -403,13 +404,17 @@ public sealed class SyncCoordinator : IAsyncDisposable
                 var transferId = clipboardEvent.Image?.TransferId ?? clipboardEvent.EventId;
                 _incomingTransfers[transferId] = new IncomingTransfer(clipboardEvent, transferId);
                 break;
+            case ContentType.MIXED_UNSUPPORTED:
+                await SendClipboardRejectAsync(clipboardEvent, "Unsupported content type");
+                break;
         }
     }
 
     private void HandleTransferBegin(TransferDescriptor descriptor)
     {
-        if (_incomingTransfers.ContainsKey(descriptor.TransferId))
+        if (_incomingTransfers.TryGetValue(descriptor.TransferId, out var incoming))
         {
+            incoming.Descriptor = descriptor;
             _logStore.Info($"Incoming image transfer {descriptor.TransferId} started");
         }
     }
@@ -418,7 +423,20 @@ public sealed class SyncCoordinator : IAsyncDisposable
     {
         if (_incomingTransfers.TryGetValue(chunk.TransferId, out var incoming))
         {
-            incoming.Output.Write(Convert.FromBase64String(chunk.Base64Payload));
+            if (!incoming.ReceivedChunkIndexes.Add(chunk.ChunkIndex))
+            {
+                _logStore.Warn($"Ignored duplicate transfer chunk {chunk.ChunkIndex} for {chunk.TransferId}");
+                return;
+            }
+
+            try
+            {
+                incoming.Output.Write(Convert.FromBase64String(chunk.Base64Payload));
+            }
+            catch (FormatException exception)
+            {
+                _logStore.Warn($"Ignored malformed transfer chunk {chunk.ChunkIndex} for {chunk.TransferId}: {exception.Message}");
+            }
         }
     }
 
@@ -430,10 +448,19 @@ public sealed class SyncCoordinator : IAsyncDisposable
         }
 
         var bytes = incoming.Output.ToArray();
+        if (incoming.Descriptor is not null &&
+            (incoming.ReceivedChunkIndexes.Count != incoming.Descriptor.TotalChunks || bytes.Length != incoming.Descriptor.TotalBytes))
+        {
+            _logStore.Warn($"Incomplete transfer {descriptor.TransferId}: received {incoming.ReceivedChunkIndexes.Count}/{incoming.Descriptor.TotalChunks} chunks and {bytes.Length}/{incoming.Descriptor.TotalBytes} bytes");
+            await SendClipboardRejectAsync(incoming.Event, "Incomplete image transfer");
+            return;
+        }
+
         var checksum = CryptoUtils.Sha256Hex(bytes);
         if (!string.Equals(checksum, descriptor.ChecksumSha256, StringComparison.OrdinalIgnoreCase))
         {
             _logStore.Warn($"Checksum mismatch for transfer {descriptor.TransferId}");
+            await SendClipboardRejectAsync(incoming.Event, "Image transfer checksum mismatch");
             return;
         }
 
@@ -449,11 +476,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
                 new NormalizedClipboardItem(clipboardEvent with { TransferState = TransferState.DEFERRED }, imageBytes, clipboardEvent.TextPayload ?? "Deferred image", FromRemote: true),
                 "Android -> Windows",
                 "Deferred");
-            await _lanServer.SendAsync(new ProtocolEnvelope(
-                "clipboard_ack",
-                DateTimeOffset.UtcNow.ToString("O"),
-                Event: clipboardEvent,
-                Status: "deferred"), _cts.Token);
+            await SendClipboardAckAsync(clipboardEvent, "deferred");
             return;
         }
 
@@ -461,6 +484,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
         if (!applied)
         {
             _logStore.Warn($"Failed to apply remote clipboard event {clipboardEvent.EventId}");
+            await SendClipboardRejectAsync(clipboardEvent, "Windows clipboard was unavailable");
             return;
         }
 
@@ -475,11 +499,25 @@ public sealed class SyncCoordinator : IAsyncDisposable
                 FromRemote: true),
             "Android -> Windows",
             "Applied");
-        await _lanServer.SendAsync(new ProtocolEnvelope(
+        await SendClipboardAckAsync(clipboardEvent, "applied");
+    }
+
+    private Task SendClipboardAckAsync(ClipboardEvent clipboardEvent, string status)
+    {
+        return _lanServer.SendAsync(new ProtocolEnvelope(
             "clipboard_ack",
             DateTimeOffset.UtcNow.ToString("O"),
             Event: clipboardEvent,
-            Status: "applied"), _cts.Token);
+            Status: status), _cts.Token);
+    }
+
+    private Task SendClipboardRejectAsync(ClipboardEvent clipboardEvent, string reason)
+    {
+        return _lanServer.SendAsync(new ProtocolEnvelope(
+            "clipboard_reject",
+            DateTimeOffset.UtcNow.ToString("O"),
+            Event: clipboardEvent,
+            Reason: reason), _cts.Token);
     }
 
     private async Task AddRecentAsync(NormalizedClipboardItem item, string direction, string status)
@@ -578,6 +616,10 @@ public sealed class SyncCoordinator : IAsyncDisposable
         public ClipboardEvent Event { get; }
 
         public string TransferId { get; }
+
+        public TransferDescriptor? Descriptor { get; set; }
+
+        public HashSet<int> ReceivedChunkIndexes { get; } = [];
 
         public MemoryStream Output { get; } = new();
     }

@@ -67,6 +67,7 @@ dependencies {
     implementation("com.squareup.okio:okio:3.10.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.google.android.material:material:1.13.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -81,4 +82,3 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
-

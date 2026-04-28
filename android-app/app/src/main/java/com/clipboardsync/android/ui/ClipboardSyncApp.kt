@@ -1,7 +1,9 @@
 package com.clipboardsync.android.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.outlined.ContentPasteSearch
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Photo
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,7 +31,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,14 +52,20 @@ import com.clipboardsync.android.service.SavedDeviceUiModel
 @Composable
 fun ClipboardSyncApp(
     viewModel: ClipboardSyncViewModel,
+    onScanPairingQr: () -> Unit = {},
     onNotificationEnabledToggle: (Boolean) -> Unit = viewModel::onNotificationEnabledChanged
 ) {
     val state by viewModel.state.collectAsState()
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Clipboard Sync") }
+                title = { Text("Clipboard Sync", fontWeight = FontWeight.SemiBold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
         }
     ) { padding ->
@@ -62,8 +73,8 @@ fun ClipboardSyncApp(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
                 StatusCard(
@@ -82,8 +93,14 @@ fun ClipboardSyncApp(
                     onSyncSmart = viewModel::onSyncSmart
                 )
             }
+            item { GuidanceCard(state.guidance) }
             item {
-                GuidanceCard(state.guidance)
+                PairingCard(
+                    payload = state.manualPairingPayload,
+                    onPayloadChanged = viewModel::onManualPayloadChanged,
+                    onScanPairingQr = onScanPairingQr,
+                    onPair = { viewModel.onPair(state.manualPairingPayload) }
+                )
             }
             item {
                 SavedDevicesCard(
@@ -92,19 +109,8 @@ fun ClipboardSyncApp(
                     onSelect = viewModel::onSelectSavedDevice
                 )
             }
-            item {
-                PairingCard(
-                    payload = state.manualPairingPayload,
-                    onPayloadChanged = viewModel::onManualPayloadChanged,
-                    onPair = { viewModel.onPair(state.manualPairingPayload) }
-                )
-            }
-            item {
-                LastItemCard(state.lastSyncedItem)
-            }
-            item {
-                SectionTitle("Recent sync history")
-            }
+            item { LastItemCard(state.lastSyncedItem) }
+            item { SectionTitle("Recent History") }
             items(state.recentItems, key = { it.eventId }) { item ->
                 RecentItemCard(item, onResend = { viewModel.onResendRecent(item.eventId) })
             }
@@ -115,94 +121,19 @@ fun ClipboardSyncApp(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     SectionTitle("Diagnostics")
-                    Button(onClick = viewModel::onClearLogs) {
-                        Text("Clear")
-                    }
-                    Button(onClick = viewModel::onCopyDebugReport) {
-                        Text("Copy report")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = viewModel::onClearLogs) { Text("Clear") }
+                        TextButton(onClick = viewModel::onCopyDebugReport) { Text("Copy report") }
                     }
                 }
             }
             items(state.logs, key = { it.timestampUtc + it.message }) { log ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("${log.level}  ${log.timestampUtc}", style = MaterialTheme.typography.labelMedium)
-                        Text(log.message, style = MaterialTheme.typography.bodyMedium)
-                    }
+                FlatCard(background = MaterialTheme.colorScheme.surfaceVariant) {
+                    Text("${log.level}  ${log.timestampUtc}", style = MaterialTheme.typography.labelMedium)
+                    Text(log.message, style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun SavedDevicesCard(
-    devices: List<SavedDeviceUiModel>,
-    onScan: () -> Unit,
-    onSelect: (String) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SectionTitle("Saved devices")
-                Button(onClick = onScan) {
-                    Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
-                    Text("Scan", modifier = Modifier.padding(start = 8.dp))
-                }
-            }
-            if (devices.isEmpty()) {
-                Text("No saved Windows devices yet. Pair once with the payload below, then this list will work like Bluetooth devices.")
-            } else {
-                devices.forEach { device ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (device.selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(device.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text(device.endpoint, style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    when {
-                                        device.connected -> "Connected"
-                                        device.available -> "Available"
-                                        device.selected -> "Selected"
-                                        else -> "Saved"
-                                    },
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                            Button(onClick = { onSelect(device.deviceId) }) {
-                                Text(if (device.selected) "Reconnect" else "Connect")
-                            }
-                        }
-                    }
-                }
-            }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
@@ -223,107 +154,52 @@ private fun StatusCard(
     onReconnect: () -> Unit,
     onSyncSmart: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Paired device", style = MaterialTheme.typography.labelLarge)
-                    Text(pairedDevice, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                }
-                Switch(checked = syncEnabled, onCheckedChange = onSyncEnabledChanged)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Keep notification active", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "Shows the pinned Sync now notification. Turning it off stops the foreground service while the app is hidden.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                Switch(checked = notificationEnabled, onCheckedChange = onNotificationEnabledChanged)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Auto-sync screenshots", style = MaterialTheme.typography.labelLarge)
-                    Text("Sends new screenshots from MediaStore without using the keyboard clipboard.", style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = autoScreenshotSyncEnabled, onCheckedChange = onAutoScreenshotSyncChanged)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Privacy pause", style = MaterialTheme.typography.labelLarge)
-                    Text("Temporarily stops outbound clipboard and screenshot sync.", style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = privacyPaused, onCheckedChange = onPrivacyPausedChanged)
-            }
-            Text("Connection: $connectionLabel")
-            Text(
-                "Transport: ${
-                    when (transport) {
-                        TransportKind.LAN -> "Wi-Fi / LAN"
-                        TransportKind.BLE_FALLBACK -> "Bluetooth fallback"
-                        TransportKind.NONE -> "No active transport"
-                    }
-                }"
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = onReconnect,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Outlined.Sync, contentDescription = null)
-                    Text("Reconnect", modifier = Modifier.padding(start = 8.dp))
-                }
-                Button(
-                    onClick = onSyncSmart,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Outlined.ContentPasteSearch, contentDescription = null)
-                    Text("Sync screenshot or clipboard", modifier = Modifier.padding(start = 8.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GuidanceCard(text: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        shape = RoundedCornerShape(24.dp)
-    ) {
+    FlatCard {
         Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
-            Text(text, style = MaterialTheme.typography.bodyMedium)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Paired Device", style = MaterialTheme.typography.labelLarge)
+                Text(pairedDevice, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Connection: $connectionLabel", style = MaterialTheme.typography.bodyMedium)
+                Text("Transport: ${transport.label()}", style = MaterialTheme.typography.bodyMedium)
+            }
+            Switch(checked = syncEnabled, onCheckedChange = onSyncEnabledChanged)
+        }
+
+        SettingRow(
+            title = "Keep Notification Active",
+            description = "Keeps the background link alive while the app is hidden.",
+            checked = notificationEnabled,
+            onCheckedChange = onNotificationEnabledChanged
+        )
+        SettingRow(
+            title = "Auto-sync Screenshots",
+            description = "Sends new screenshots from MediaStore.",
+            checked = autoScreenshotSyncEnabled,
+            onCheckedChange = onAutoScreenshotSyncChanged
+        )
+        SettingRow(
+            title = "Privacy Pause",
+            description = "Temporarily stops outbound clipboard and screenshot sync.",
+            checked = privacyPaused,
+            onCheckedChange = onPrivacyPausedChanged
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(onClick = onReconnect, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.Sync, contentDescription = null)
+                Text("Reconnect", modifier = Modifier.padding(start = 8.dp))
+            }
+            Button(onClick = onSyncSmart, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.ContentPasteSearch, contentDescription = null)
+                Text("Sync now", modifier = Modifier.padding(start = 8.dp))
+            }
         }
     }
 }
@@ -332,63 +208,122 @@ private fun GuidanceCard(text: String) {
 private fun PairingCard(
     payload: String,
     onPayloadChanged: (String) -> Unit,
+    onScanPairingQr: () -> Unit,
     onPair: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+    FlatCard {
+        SectionTitle("Pair with Windows")
+        Text(
+            "Scan the QR code shown on the Windows app. If your camera struggles, raise the PC screen brightness or paste the payload.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            SectionTitle("Manual pairing")
-            Text("Paste the pairing payload shown by the Windows app. This contains the server address, certificate fingerprint, and temporary pairing secret.")
-            OutlinedTextField(
-                value = payload,
-                onValueChange = onPayloadChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Pairing payload") }
-            )
-            Button(onClick = onPair) {
-                Text("Pair device")
+            Button(onClick = onScanPairingQr, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                Text("Scan QR", modifier = Modifier.padding(start = 8.dp))
             }
+            Button(onClick = onPair, modifier = Modifier.weight(1f)) {
+                Text("Pair")
+            }
+        }
+        OutlinedTextField(
+            value = payload,
+            onValueChange = onPayloadChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Manual pairing payload") },
+            minLines = 2
+        )
+    }
+}
+
+@Composable
+private fun SavedDevicesCard(
+    devices: List<SavedDeviceUiModel>,
+    onScan: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    FlatCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SectionTitle("Saved Devices")
+            TextButton(onClick = onScan) {
+                Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
+                Text("Scan", modifier = Modifier.padding(start = 6.dp))
+            }
+        }
+        if (devices.isEmpty()) {
+            Text("No saved Windows devices yet. Pair once, then reconnect from this list.")
+        } else {
+            devices.forEach { device ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (device.selected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(device.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(device.endpoint, style = MaterialTheme.typography.bodySmall)
+                            Text(device.statusLabel(), style = MaterialTheme.typography.labelMedium)
+                        }
+                        TextButton(onClick = { onSelect(device.deviceId) }) {
+                            Text(if (device.selected) "Reconnect" else "Connect")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuidanceCard(text: String) {
+    FlatCard(background = MaterialTheme.colorScheme.surfaceVariant) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
+            Text(text, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 @Composable
 private fun LastItemCard(item: RecentItemUiModel?) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            SectionTitle("Last synced item")
-            if (item == null) {
-                Text("No clipboard item synced yet.")
-            } else {
-                RecentItemBody(item)
-            }
+    FlatCard {
+        SectionTitle("Last Synced Item")
+        if (item == null) {
+            Text("No clipboard item synced yet.")
+        } else {
+            RecentItemBody(item)
         }
     }
 }
 
 @Composable
 private fun RecentItemCard(item: RecentItemUiModel, onResend: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            RecentItemBody(item)
-            Button(onClick = onResend, modifier = Modifier.padding(top = 8.dp)) {
-                Text("Resend")
-            }
+    FlatCard(background = MaterialTheme.colorScheme.surfaceVariant) {
+        RecentItemBody(item)
+        TextButton(onClick = onResend) {
+            Text("Resend")
         }
     }
 }
@@ -408,7 +343,7 @@ private fun RecentItemBody(item: RecentItemUiModel) {
             },
             contentDescription = null
         )
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(item.directionLabel, style = MaterialTheme.typography.labelLarge)
             Text(item.previewText, style = MaterialTheme.typography.bodyLarge)
             if (item.previewUri != null) {
@@ -421,14 +356,67 @@ private fun RecentItemBody(item: RecentItemUiModel) {
                     contentScale = ContentScale.Crop
                 )
             }
-            Text("Payload: ${item.payloadSizeBytes} bytes")
-            Text("State: ${item.transferState} / ${item.status}")
+            Text("Payload: ${item.payloadSizeBytes} bytes", style = MaterialTheme.typography.bodySmall)
+            Text("State: ${item.transferState} / ${item.status}", style = MaterialTheme.typography.bodySmall)
             Text(item.syncedAtUtc, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
 
 @Composable
+private fun SettingRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.labelLarge)
+            Text(description, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun FlatCard(
+    background: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = background),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
 private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+}
+
+private fun TransportKind.label(): String = when (this) {
+    TransportKind.LAN -> "Wi-Fi / LAN"
+    TransportKind.BLE_FALLBACK -> "Bluetooth fallback"
+    TransportKind.NONE -> "No active transport"
+}
+
+private fun SavedDeviceUiModel.statusLabel(): String = when {
+    connected -> "Connected"
+    available -> "Available"
+    selected -> "Selected"
+    else -> "Saved"
 }
