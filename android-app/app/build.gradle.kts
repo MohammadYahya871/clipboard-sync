@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseVersionName = rootProject.file("../VERSION").readText().trim()
+val releaseVersionCode = rootProject.file("../VERSION_CODE").readText().trim().toInt()
+
 android {
     namespace = "com.clipboardsync.android"
     compileSdk = 36
@@ -12,8 +15,8 @@ android {
         applicationId = "com.clipboardsync.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

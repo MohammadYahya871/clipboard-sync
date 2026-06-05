@@ -3,6 +3,7 @@ package com.clipboardsync.android.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.clipboardsync.android.service.SyncMode
 import com.clipboardsync.android.service.SyncRepository
 import com.clipboardsync.android.service.SyncUiState
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,6 +31,16 @@ class ClipboardSyncViewModel(
 
     fun onPrivacyPausedChanged(paused: Boolean) = repository.setPrivacyPaused(paused)
 
+    fun onSyncModeChanged(mode: SyncMode) = repository.setSyncMode(mode)
+
+    fun onAllowTextSyncChanged(enabled: Boolean) = repository.setAllowTextSync(enabled)
+
+    fun onAllowUrlSyncChanged(enabled: Boolean) = repository.setAllowUrlSync(enabled)
+
+    fun onAllowImageSyncChanged(enabled: Boolean) = repository.setAllowImageSync(enabled)
+
+    fun onMaxImageSizeChanged(value: Int) = repository.setMaxImageSizeMb(value)
+
     fun onPair(payload: String) = repository.pair(payload)
 
     fun onManualPayloadChanged(payload: String) = repository.updateManualPairingPayload(payload)
@@ -43,6 +54,10 @@ class ClipboardSyncViewModel(
     fun onSyncSmart() = repository.syncSmartNow()
 
     fun onResendRecent(eventId: String) = repository.resendRecent(eventId)
+
+    fun onCopyRecentToClipboard(eventId: String) = repository.copyRecentToClipboard(eventId)
+
+    fun onApplyDeferredIncoming(eventId: String) = repository.applyDeferredIncoming(eventId)
 
     fun onClearLogs() = repository.clearLogs()
 

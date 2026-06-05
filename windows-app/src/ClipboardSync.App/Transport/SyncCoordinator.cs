@@ -23,6 +23,8 @@ public sealed class SyncCoordinator : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, PendingEvent> _pendingByEventId = new();
     private readonly ConcurrentDictionary<string, IncomingTransfer> _incomingTransfers = new();
+    private readonly ConcurrentDictionary<string, NormalizedClipboardItem> _recentPayloads = new();
+    private readonly ConcurrentDictionary<string, NormalizedClipboardItem> _deferredIncoming = new();
     private readonly Queue<PendingEvent> _outboundQueue = new();
     private readonly X509Certificate2 _certificate;
     private readonly LanServer _lanServer;
@@ -89,6 +91,59 @@ public sealed class SyncCoordinator : IAsyncDisposable
         }
     }
 
+    public SyncMode SyncMode
+    {
+        get => _settingsStore.Current.SyncMode;
+        set
+        {
+            if (_settingsStore.Current.SyncMode == value)
+            {
+                return;
+            }
+
+            _settingsStore.Current.SyncMode = value;
+            _settingsStore.Save();
+            _logStore.Info($"Windows sync mode set to {value}");
+            OnStateChanged();
+        }
+    }
+
+    public bool AllowTextSync
+    {
+        get => _settingsStore.Current.AllowTextSync;
+        set => SetPolicyValue(_settingsStore.Current.AllowTextSync, value, next => _settingsStore.Current.AllowTextSync = next, "text");
+    }
+
+    public bool AllowUrlSync
+    {
+        get => _settingsStore.Current.AllowUrlSync;
+        set => SetPolicyValue(_settingsStore.Current.AllowUrlSync, value, next => _settingsStore.Current.AllowUrlSync = next, "URL");
+    }
+
+    public bool AllowImageSync
+    {
+        get => _settingsStore.Current.AllowImageSync;
+        set => SetPolicyValue(_settingsStore.Current.AllowImageSync, value, next => _settingsStore.Current.AllowImageSync = next, "image");
+    }
+
+    public int MaxImageSizeMb
+    {
+        get => _settingsStore.Current.MaxImageSizeMb;
+        set
+        {
+            var next = Math.Clamp(value, 1, 200);
+            if (_settingsStore.Current.MaxImageSizeMb == next)
+            {
+                return;
+            }
+
+            _settingsStore.Current.MaxImageSizeMb = next;
+            _settingsStore.Save();
+            _logStore.Info($"Windows max image size set to {next} MB");
+            OnStateChanged();
+        }
+    }
+
     public string PairedDeviceLabel => _pairedDeviceLabel;
 
     public string ConnectionLabel => _connectionLabel;
@@ -105,6 +160,8 @@ public sealed class SyncCoordinator : IAsyncDisposable
 
     public string LastItemSummary => _lastItemSummary;
 
+    public string QueueSummary => $"Queued {_outboundQueue.Count + _pendingByEventId.Count} / Deferred {_deferredIncoming.Count}";
+
     public event EventHandler? StateChanged;
 
     public async Task InitializeAsync()
@@ -119,6 +176,79 @@ public sealed class SyncCoordinator : IAsyncDisposable
         await _lanDiscoveryResponder.StartAsync(_cts.Token);
         _logStore.Info($"Selected LAN address {CurrentLanAddress} for pairing payloads");
         _logStore.Info("Sync coordinator initialized");
+    }
+
+    public async Task SendCurrentClipboardNowAsync()
+    {
+        if (!CanSendOutbound("Manual send"))
+        {
+            return;
+        }
+
+        var normalized = await _clipboardExtractor.ExtractCurrentAsync();
+        if (normalized is null)
+        {
+            _logStore.Info("Manual send ignored because no supported payload was found");
+            return;
+        }
+
+        await QueueLocalItemAsync(normalized, "manual-send", force: true);
+    }
+
+    public async Task ResendRecentAsync(string eventId)
+    {
+        if (!CanSendOutbound("Resend"))
+        {
+            return;
+        }
+
+        if (!_recentPayloads.TryGetValue(eventId, out var item))
+        {
+            _logStore.Warn($"Recent item {eventId} is no longer available for resend");
+            return;
+        }
+
+        var pending = new PendingEvent(item);
+        _pendingByEventId[eventId] = pending;
+        _outboundQueue.Enqueue(pending);
+        await UpdateRecentStatusAsync(eventId, TransferState.QUEUED, "Queued");
+        OnStateChanged();
+        await FlushQueueAsync();
+    }
+
+    public async Task RestoreRecentToClipboardAsync(string eventId)
+    {
+        if (!_recentPayloads.TryGetValue(eventId, out var item))
+        {
+            _logStore.Warn($"Recent item {eventId} is no longer available to restore");
+            return;
+        }
+
+        if (await _clipboardWriter.ApplyRemoteAsync(item.Event, item.ImageBytes))
+        {
+            _loopGuard.MarkRemoteApplied(item.Event.ContentHashSha256);
+            _logStore.Info($"Restored recent item {eventId} to Windows clipboard");
+        }
+    }
+
+    public async Task ApplyDeferredIncomingAsync(string eventId)
+    {
+        if (!_deferredIncoming.TryRemove(eventId, out var item))
+        {
+            _logStore.Warn($"Deferred item {eventId} is no longer available");
+            OnStateChanged();
+            return;
+        }
+
+        if (await _clipboardWriter.ApplyRemoteAsync(item.Event, item.ImageBytes))
+        {
+            _loopGuard.MarkRemoteApplied(item.Event.ContentHashSha256);
+            _loopGuard.RememberSeenEvent(item.Event.EventId);
+            await UpdateRecentStatusAsync(eventId, TransferState.ACKED, "Applied");
+            _logStore.Info($"Applied deferred item {eventId}");
+        }
+
+        OnStateChanged();
     }
 
     public void CopyPairingPayloadToClipboard()
@@ -210,9 +340,9 @@ public sealed class SyncCoordinator : IAsyncDisposable
 
     private async Task HandleLocalClipboardChangedAsync()
     {
-        if (!SyncEnabled)
+        if (!CanMirrorClipboardChange())
         {
-            _logStore.Info("Clipboard update ignored because sync is disabled");
+            _logStore.Info($"Clipboard update ignored in {SyncMode} mode");
             return;
         }
 
@@ -223,10 +353,34 @@ public sealed class SyncCoordinator : IAsyncDisposable
             return;
         }
 
-        _logStore.Info($"Detected local clipboard event {normalized.Event.EventId} ({normalized.Event.ContentType})");
+        await QueueLocalItemAsync(normalized, "clipboard-change", force: false);
+    }
+
+    private async Task QueueLocalItemAsync(NormalizedClipboardItem normalized, string trigger, bool force)
+    {
+        if (!CanSendOutbound("Outbound sync"))
+        {
+            return;
+        }
+
+        var rejection = PolicyRejectionReason(normalized);
+        if (rejection is not null)
+        {
+            _logStore.Warn($"Skipped clipboard event {normalized.Event.EventId} from {trigger}: {rejection}");
+            await AddRecentAsync(normalized with { Event = normalized.Event with { TransferState = TransferState.FAILED } }, "Windows -> Android", "Filtered");
+            return;
+        }
+
+        _logStore.Info($"Detected local clipboard event {normalized.Event.EventId} ({normalized.Event.ContentType}) from {trigger}");
         if (_loopGuard.ShouldSuppressLocal(normalized.Event.ContentHashSha256))
         {
             _logStore.Info($"Suppressed clipboard echo for {normalized.Event.EventId}");
+            return;
+        }
+        if (SyncMode == SyncMode.ASK && !force)
+        {
+            await AddRecentAsync(normalized, "Windows -> Android", "Staged");
+            _logStore.Info($"Staged clipboard event {normalized.Event.EventId}; use Send from history to transfer");
             return;
         }
 
@@ -248,6 +402,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
 
         while (_outboundQueue.TryDequeue(out var pending))
         {
+            OnStateChanged();
             pending.Attempts++;
             pending.LastAttemptUtc = DateTimeOffset.UtcNow;
             await _lanServer.SendClipboardEventAsync(
@@ -271,11 +426,13 @@ public sealed class SyncCoordinator : IAsyncDisposable
             await UpdateRecentStatusAsync(eventId, TransferState.FAILED, "Failed");
             _pendingByEventId.TryRemove(eventId, out _);
             _logStore.Warn($"Clipboard event {eventId} failed after retries");
+            OnStateChanged();
             return;
         }
 
         _outboundQueue.Enqueue(pending);
         _logStore.Warn($"Retrying clipboard event {eventId}");
+        OnStateChanged();
         await FlushQueueAsync();
     }
 
@@ -333,6 +490,16 @@ public sealed class SyncCoordinator : IAsyncDisposable
                 {
                     _pendingByEventId.TryRemove(envelope.Event.EventId, out _);
                     await UpdateRecentStatusAsync(envelope.Event.EventId, TransferState.ACKED, envelope.Status ?? "Acked");
+                    OnStateChanged();
+                }
+                break;
+
+            case "clipboard_reject":
+                if (envelope.Event is not null)
+                {
+                    _pendingByEventId.TryRemove(envelope.Event.EventId, out _);
+                    await UpdateRecentStatusAsync(envelope.Event.EventId, TransferState.FAILED, envelope.Reason ?? "Rejected");
+                    OnStateChanged();
                 }
                 break;
 
@@ -469,14 +636,25 @@ public sealed class SyncCoordinator : IAsyncDisposable
 
     private async Task ApplyRemoteEventAsync(ClipboardEvent clipboardEvent, byte[]? imageBytes)
     {
+        if (SyncMode == SyncMode.SEND_ONLY)
+        {
+            _logStore.Warn($"Rejected incoming clipboard event {clipboardEvent.EventId} because send-only mode is enabled");
+            await SendClipboardRejectAsync(clipboardEvent, "Receive disabled");
+            return;
+        }
+
         if (_lastLocalClipboardAt > DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMilliseconds(1500)))
         {
             _logStore.Warn($"Deferring remote clipboard event {clipboardEvent.EventId} because a newer local change exists");
-            await AddRecentAsync(
-                new NormalizedClipboardItem(clipboardEvent with { TransferState = TransferState.DEFERRED }, imageBytes, clipboardEvent.TextPayload ?? "Deferred image", FromRemote: true),
-                "Android -> Windows",
-                "Deferred");
+            var deferred = new NormalizedClipboardItem(
+                clipboardEvent with { TransferState = TransferState.DEFERRED },
+                imageBytes,
+                clipboardEvent.TextPayload ?? "Deferred image",
+                FromRemote: true);
+            _deferredIncoming[clipboardEvent.EventId] = deferred;
+            await AddRecentAsync(deferred, "Android -> Windows", "Deferred");
             await SendClipboardAckAsync(clipboardEvent, "deferred");
+            OnStateChanged();
             return;
         }
 
@@ -522,6 +700,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
 
     private async Task AddRecentAsync(NormalizedClipboardItem item, string direction, string status)
     {
+        _recentPayloads[item.Event.EventId] = item;
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
             var recent = new RecentClipboardItem
@@ -544,6 +723,52 @@ public sealed class SyncCoordinator : IAsyncDisposable
             _lastItemSummary = $"{recent.DirectionLabel}: {recent.PreviewText} ({recent.Status})";
             OnStateChanged();
         });
+    }
+
+    private bool CanSendOutbound(string action)
+    {
+        if (!SyncEnabled)
+        {
+            _logStore.Warn($"{action} skipped because sync is disabled");
+            return false;
+        }
+        if (SyncMode == SyncMode.RECEIVE_ONLY)
+        {
+            _logStore.Warn($"{action} skipped because receive-only mode is enabled");
+            return false;
+        }
+        return true;
+    }
+
+    private bool CanMirrorClipboardChange()
+    {
+        return SyncEnabled && SyncMode == SyncMode.MIRROR;
+    }
+
+    private string? PolicyRejectionReason(NormalizedClipboardItem item)
+    {
+        return item.Event.ContentType switch
+        {
+            ContentType.TEXT when !AllowTextSync => "text sync is disabled",
+            ContentType.URL when !AllowUrlSync => "URL sync is disabled",
+            ContentType.IMAGE when !AllowImageSync => "image sync is disabled",
+            ContentType.IMAGE when item.Event.PayloadSizeBytes > MaxImageSizeMb * 1024L * 1024L => $"image is larger than {MaxImageSizeMb} MB",
+            ContentType.MIXED_UNSUPPORTED => "mixed clipboard content is unsupported",
+            _ => null
+        };
+    }
+
+    private void SetPolicyValue(bool current, bool next, Action<bool> assign, string label)
+    {
+        if (current == next)
+        {
+            return;
+        }
+
+        assign(next);
+        _settingsStore.Save();
+        _logStore.Info($"Windows {label} sync set to {next}");
+        OnStateChanged();
     }
 
     private async Task UpdateRecentStatusAsync(string eventId, TransferState transferState, string status)

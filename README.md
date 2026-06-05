@@ -17,25 +17,25 @@ Prebuilt outputs are published in GitHub Releases for people who just want to in
 - Latest release page:
   - `Releases` on this repository
 - Release assets:
-  - `ClipboardSync-android-debug.apk`
-  - `ClipboardSync-windows-x64.zip`
+  - `ClipboardSync-VERSION-android-debug.apk`
+  - `ClipboardSync-VERSION-windows-x64.zip`
   - `SHA256SUMS.txt`
 
 ### Android install
 
 Using `adb`:
 
-Download `ClipboardSync-android-debug.apk` from the latest GitHub Release, then install it with:
+Download `ClipboardSync-VERSION-android-debug.apk` from the latest GitHub Release, then install it with:
 
 ```powershell
-adb install -r ClipboardSync-android-debug.apk
+adb install -r ClipboardSync-VERSION-android-debug.apk
 ```
 
 Or copy the APK to the phone and install it normally.
 
 ### Windows install
 
-1. Download `ClipboardSync-windows-x64.zip` from the latest GitHub Release
+1. Download `ClipboardSync-VERSION-windows-x64.zip` from the latest GitHub Release
 2. Extract it
 3. Run `ClipboardSync.App.exe`
 4. If SmartScreen appears, choose `More info` -> `Run anyway`
@@ -52,9 +52,14 @@ The packaged Windows build is a self-contained preview build for `Windows x64`, 
 - Loop prevention using event IDs + content hashes + suppression windows
 - Retry and acknowledgement flow
 - Recent history and diagnostics on both platforms
+- Restore, resend, or apply deferred items from recent history
 - Windows background / tray operation
+- Windows tray quick actions for opening the app, pausing sync, and sending the current clipboard
 - Android manual clipboard push button
+- Android share target for sending shared text or images directly to the PC clipboard
 - Android foreground notification with `Sync now`
+- Selective sync modes: `Mirror`, `Manual`, `Ask`, `Receive only`, and `Send only`
+- Content filters for text, URLs, images, and maximum image transfer size
 
 ## Important Android Limitation
 
@@ -65,6 +70,7 @@ This repository handles that honestly:
 - while the Android app is visible, clipboard change detection works normally
 - while hidden, the foreground notification keeps the connection alive and exposes `Sync now`
 - the in-app `Sync clipboard` button is the most reliable Android -> Windows path
+- the Android share sheet entry `Sync to PC clipboard` copies shared text/images into Android clipboard and sends that exact item to Windows
 - the notification action uses a foreground activity workaround because hidden background clipboard reads can still be blocked by Android / OEM firmware
 
 ## Quick Start
@@ -77,6 +83,22 @@ This repository handles that honestly:
 6. Test Android -> Windows by copying something on Android and then either:
    - tapping `Sync clipboard` inside the app
    - tapping `Sync now` from the foreground notification
+   - using Android `Share` -> `Sync to PC clipboard` on text or an image
+
+## Smart Sync Modes
+
+- `Mirror`
+  Sends supported clipboard changes automatically when the platform allows it.
+- `Manual`
+  Only sends from explicit actions such as `Send Clipboard Now`, Android `Sync now`, Quick Settings, or the Android share target.
+- `Ask`
+  Stages detected clipboard items in history; use `Send` / `Resend` to transfer them.
+- `Receive only`
+  Blocks outbound sends while still accepting incoming clipboard items.
+- `Send only`
+  Blocks incoming clipboard writes while allowing outbound sends.
+
+Both platforms can filter outbound text, URLs, and images. Image sync also has a maximum transfer-size rule. Deferred incoming items remain in recent history and can be applied later.
 
 ## Packaging Layout
 
@@ -90,6 +112,8 @@ This repository handles that honestly:
   architecture, protocol, setup, risk register, and test matrix
 - `dist/`
   local packaging layout used to produce release artifacts
+- `VERSION` / `VERSION_CODE`
+  shared version metadata used by Android, iOS, and Windows release builds
 
 ## Build From Source
 
@@ -130,6 +154,17 @@ Publish a self-contained Windows package:
 ```powershell
 dotnet publish windows-app\src\ClipboardSync.App\ClipboardSync.App.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true
 ```
+
+### Release packaging
+
+Versioning is centralized in `VERSION` and `VERSION_CODE`.
+
+```powershell
+.\scripts\set-version.ps1 -Version 1.2.3 -VersionCode 12
+.\scripts\package-release.ps1
+```
+
+Release outputs are written to `dist/release/vVERSION/` and are not committed.
 
 ## Logging
 

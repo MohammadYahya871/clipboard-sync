@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <ClipboardSyncVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</ClipboardSyncVersion>
+    <Version>$(ClipboardSyncVersion)</Version>
+    <AssemblyVersion>$(ClipboardSyncVersion).0</AssemblyVersion>
+    <FileVersion>$(ClipboardSyncVersion).0</FileVersion>
+    <InformationalVersion>$(ClipboardSyncVersion)</InformationalVersion>
+  </PropertyGroup>
+</Project>

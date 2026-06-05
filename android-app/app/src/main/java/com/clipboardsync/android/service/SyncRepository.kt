@@ -66,6 +66,14 @@ data class SavedDeviceUiModel(
     val connected: Boolean
 )
 
+enum class SyncMode(val label: String) {
+    MIRROR("Mirror"),
+    MANUAL("Manual"),
+    ASK("Ask"),
+    RECEIVE_ONLY("Receive only"),
+    SEND_ONLY("Send only")
+}
+
 data class SyncUiState(
     val syncEnabled: Boolean = true,
     val notificationEnabled: Boolean = true,
@@ -79,7 +87,14 @@ data class SyncUiState(
     val manualPairingPayload: String = "",
     val autoScreenshotSyncEnabled: Boolean = true,
     val privacyPaused: Boolean = false,
-    val guidance: String = "Add the Clipboard Sync Quick Settings tile for the fastest one-tap send. The smart sync action prefers a fresh latest screenshot by copying it into Android clipboard and sending it to Windows; otherwise it falls back to the current clipboard. The notification now mainly keeps the background link alive."
+    val syncMode: SyncMode = SyncMode.MIRROR,
+    val allowTextSync: Boolean = true,
+    val allowUrlSync: Boolean = true,
+    val allowImageSync: Boolean = true,
+    val maxImageSizeMb: Int = 25,
+    val queuedOutboundCount: Int = 0,
+    val deferredIncomingCount: Int = 0,
+    val guidance: String = "Mirror mode syncs foreground clipboard changes. Manual mode waits for buttons, shares, or tiles. Ask mode stages items in history before you resend them. Receive/send-only modes are useful for privacy."
 )
 
 private data class PendingEvent(
@@ -118,7 +133,12 @@ class SyncRepository(
             syncEnabled = isSyncEnabled(),
             notificationEnabled = isNotificationEnabled(),
             autoScreenshotSyncEnabled = isAutoScreenshotSyncEnabled(),
-            privacyPaused = isPrivacyPaused()
+            privacyPaused = isPrivacyPaused(),
+            syncMode = syncMode(),
+            allowTextSync = allowTextSync(),
+            allowUrlSync = allowUrlSync(),
+            allowImageSync = allowImageSync(),
+            maxImageSizeMb = maxImageSizeMb()
         )
     )
     val uiState: StateFlow<SyncUiState> = _uiState.asStateFlow()
@@ -126,6 +146,8 @@ class SyncRepository(
     private val outboundQueue = ArrayDeque<PendingEvent>()
     private val pendingByEventId = ConcurrentHashMap<String, PendingEvent>()
     private val incomingTransfers = ConcurrentHashMap<String, IncomingTransfer>()
+    private val recentPayloads = ConcurrentHashMap<String, NormalizedClipboard>()
+    private val deferredIncoming = ConcurrentHashMap<String, NormalizedClipboard>()
     private var uiForeground = false
     private var serviceActive = false
     private var lastLocalClipboardAt = Instant.EPOCH
@@ -228,6 +250,32 @@ class SyncRepository(
         logger.warn(if (paused) "Privacy pause enabled; outbound sync paused" else "Privacy pause disabled; outbound sync resumed")
     }
 
+    fun setSyncMode(mode: SyncMode) {
+        prefs.edit().putString(KEY_SYNC_MODE, mode.name).apply()
+        _uiState.value = _uiState.value.copy(syncMode = mode)
+        logger.info("Sync mode set to ${mode.label}")
+    }
+
+    fun setAllowTextSync(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ALLOW_TEXT_SYNC, enabled).apply()
+        refreshPolicyState()
+    }
+
+    fun setAllowUrlSync(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ALLOW_URL_SYNC, enabled).apply()
+        refreshPolicyState()
+    }
+
+    fun setAllowImageSync(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ALLOW_IMAGE_SYNC, enabled).apply()
+        refreshPolicyState()
+    }
+
+    fun setMaxImageSizeMb(value: Int) {
+        prefs.edit().putInt(KEY_MAX_IMAGE_SIZE_MB, value.coerceIn(1, 200)).apply()
+        refreshPolicyState()
+    }
+
     fun reconnect() {
         logger.info("Manual reconnect requested")
         ensureConnected(force = true)
@@ -247,8 +295,7 @@ class SyncRepository(
     }
 
     fun syncCurrentClipboardNow(trigger: String = "manual-button") {
-        if (!isSyncEnabled()) {
-            logger.warn("Manual clipboard sync skipped because sync is disabled")
+        if (!canSendOutbound("Manual clipboard sync")) {
             return
         }
 
@@ -263,9 +310,32 @@ class SyncRepository(
         }
     }
 
+    fun syncSharedClipNow(clip: ClipData, trigger: String = "android-share-sheet") {
+        if (!canSendOutbound("Shared clipboard sync")) {
+            return
+        }
+
+        scope.launch {
+            logger.info("Shared clipboard sync requested from $trigger")
+            ensureConnected(force = true)
+            val normalized = runCatching {
+                clipboardNormalizer.normalizeClip(clip)
+            }.getOrElse {
+                logger.error("Failed to normalize shared clipboard content from $trigger", it)
+                return@launch
+            }
+
+            if (normalized == null) {
+                logger.warn("Shared content from $trigger is unsupported or empty")
+                return@launch
+            }
+
+            syncNormalizedIfNeeded(normalized, trigger, forceResend = true)
+        }
+    }
+
     fun syncSmartNow(trigger: String = "smart-sync") {
-        if (!isSyncEnabled() || isPrivacyPaused()) {
-            logger.warn("Smart sync skipped because sync is disabled or privacy paused")
+        if (!canSendOutbound("Smart sync")) {
             return
         }
 
@@ -283,8 +353,7 @@ class SyncRepository(
     }
 
     fun syncLatestScreenshotNow(trigger: String = "manual-screenshot") {
-        if (!isSyncEnabled() || isPrivacyPaused()) {
-            logger.warn("Screenshot sync skipped because sync is disabled or privacy paused")
+        if (!canSendOutbound("Screenshot sync")) {
             return
         }
 
@@ -295,14 +364,55 @@ class SyncRepository(
     }
 
     fun resendRecent(eventId: String) {
-        val pending = pendingByEventId[eventId]
+        if (!canSendOutbound("Resend")) {
+            return
+        }
+
+        val pending = pendingByEventId[eventId] ?: recentPayloads[eventId]?.let { PendingEvent(it) }
         if (pending == null) {
-            logger.warn("Only queued or pending items can be resent in this preview build")
+            logger.warn("Recent item $eventId is no longer available for resend")
             return
         }
         outboundQueue.addLast(pending)
+        pendingByEventId[eventId] = pending
         logger.info("Requeued clipboard event $eventId")
+        updateQueueCounts()
         flushQueue()
+    }
+
+    fun copyRecentToClipboard(eventId: String) {
+        val recent = recentPayloads[eventId] ?: run {
+            logger.warn("Recent item $eventId is no longer available to restore")
+            return
+        }
+
+        scope.launch {
+            val applied = clipboardApplyUseCase.applyRemoteClip(recent.event, recent.imageBytes)
+            if (applied) {
+                lastQueuedLocalHash = recent.event.contentHashSha256
+                loopGuard.markRemoteApplied(recent.event.contentHashSha256)
+                logger.info("Restored recent item $eventId to Android clipboard")
+            }
+        }
+    }
+
+    fun applyDeferredIncoming(eventId: String) {
+        val deferred = deferredIncoming.remove(eventId) ?: run {
+            logger.warn("Deferred item $eventId is no longer available")
+            updateQueueCounts()
+            return
+        }
+
+        scope.launch {
+            val applied = clipboardApplyUseCase.applyRemoteClip(deferred.event, deferred.imageBytes)
+            if (applied) {
+                loopGuard.markRemoteApplied(deferred.event.contentHashSha256)
+                loopGuard.rememberSeenEvent(deferred.event.eventId)
+                updateRecentStatus(eventId, TransferState.ACKED, "Applied")
+                logger.info("Applied deferred incoming item $eventId")
+            }
+            updateQueueCounts()
+        }
     }
 
     fun copyDebugReport() {
@@ -344,7 +454,7 @@ class SyncRepository(
     }
 
     fun onClipboardChanged() {
-        if (!uiForeground || !isSyncEnabled() || isPrivacyPaused()) {
+        if (!uiForeground || !canMirrorClipboardChange()) {
             return
         }
         clipboardChangeJob?.cancel()
@@ -362,6 +472,30 @@ class SyncRepository(
 
     private fun isPrivacyPaused(): Boolean = prefs.getBoolean(KEY_PRIVACY_PAUSED, false)
 
+    private fun syncMode(): SyncMode {
+        val saved = prefs.getString(KEY_SYNC_MODE, SyncMode.MIRROR.name)
+        return runCatching { SyncMode.valueOf(saved ?: SyncMode.MIRROR.name) }.getOrDefault(SyncMode.MIRROR)
+    }
+
+    private fun allowTextSync(): Boolean = prefs.getBoolean(KEY_ALLOW_TEXT_SYNC, true)
+
+    private fun allowUrlSync(): Boolean = prefs.getBoolean(KEY_ALLOW_URL_SYNC, true)
+
+    private fun allowImageSync(): Boolean = prefs.getBoolean(KEY_ALLOW_IMAGE_SYNC, true)
+
+    private fun maxImageSizeMb(): Int = prefs.getInt(KEY_MAX_IMAGE_SIZE_MB, 25).coerceIn(1, 200)
+
+    private fun refreshPolicyState() {
+        _uiState.value = _uiState.value.copy(
+            syncMode = syncMode(),
+            allowTextSync = allowTextSync(),
+            allowUrlSync = allowUrlSync(),
+            allowImageSync = allowImageSync(),
+            maxImageSizeMb = maxImageSizeMb()
+        )
+        logger.info("Sync rules updated")
+    }
+
     private fun refreshPairedState() {
         val peer = trustedDeviceRepository.getTrustedPeer()
         _uiState.value = _uiState.value.copy(
@@ -370,6 +504,11 @@ class SyncRepository(
             notificationEnabled = isNotificationEnabled(),
             autoScreenshotSyncEnabled = isAutoScreenshotSyncEnabled(),
             privacyPaused = isPrivacyPaused(),
+            syncMode = syncMode(),
+            allowTextSync = allowTextSync(),
+            allowUrlSync = allowUrlSync(),
+            allowImageSync = allowImageSync(),
+            maxImageSizeMb = maxImageSizeMb(),
             savedDevices = buildSavedDeviceModels()
         )
     }
@@ -442,6 +581,7 @@ class SyncRepository(
         outboundQueue.addLast(pending)
         pendingByEventId[normalized.event.eventId] = pending
         loopGuard.rememberSeenEvent(normalized.event.eventId)
+        updateQueueCounts()
     }
 
     private fun flushQueue() {
@@ -455,6 +595,7 @@ class SyncRepository(
         flushJob = scope.launch {
             while (outboundQueue.isNotEmpty() && lanClient.state.value == LanConnectionState.READY) {
                 val pending = outboundQueue.removeFirst()
+                updateQueueCounts()
                 sendPending(pending)
             }
         }
@@ -471,6 +612,7 @@ class SyncRepository(
         if (!sent) {
             logger.warn("LAN send was interrupted for ${pending.normalized.event.eventId}; it will retry after reconnect")
             outboundQueue.addFirst(pending)
+            updateQueueCounts()
             lanClient.disconnect()
             scheduleReconnect()
             return
@@ -486,10 +628,12 @@ class SyncRepository(
                 logger.warn("Event $eventId failed after retries")
                 updateRecentStatus(eventId, TransferState.FAILED, "Failed")
                 pendingByEventId.remove(eventId)
+                updateQueueCounts()
                 return@launch
             }
             logger.warn("Retrying event $eventId after ack timeout")
             outboundQueue.addLast(pending)
+            updateQueueCounts()
             flushQueue()
         }
     }
@@ -620,6 +764,7 @@ class SyncRepository(
     private fun handleAck(envelope: ProtocolEnvelope) {
         val eventId = envelope.event?.eventId ?: return
         pendingByEventId.remove(eventId)
+        updateQueueCounts()
         val status = envelope.status ?: "Acked"
         val transferState = if (status == "deferred") TransferState.DEFERRED else TransferState.ACKED
         updateRecentStatus(eventId, transferState, status.replaceFirstChar { it.uppercase() })
@@ -632,20 +777,36 @@ class SyncRepository(
         logger.warn("Clipboard event rejected: $reason")
         if (eventId != null) {
             pendingByEventId.remove(eventId)
+            updateQueueCounts()
             updateRecentStatus(eventId, TransferState.FAILED, reason)
         }
     }
 
     private suspend fun applyRemoteEvent(event: ClipboardEvent, imageBytes: ByteArray?) {
+        if (syncMode() == SyncMode.SEND_ONLY) {
+            logger.warn("Rejected incoming event ${event.eventId} because send-only mode is enabled")
+            lanClient.sendEnvelope(
+                ProtocolEnvelope(
+                    type = "clipboard_reject",
+                    event = event,
+                    reason = "Receive disabled"
+                )
+            )
+            return
+        }
+
         if (lastLocalClipboardAt.isAfter(Instant.now().minus(CONFLICT_WINDOW_MILLIS, ChronoUnit.MILLIS))) {
             logger.warn("Deferred remote event ${event.eventId} because local clipboard changed recently")
+            val deferred = NormalizedClipboard(
+                event = event.copy(transferState = TransferState.DEFERRED),
+                imageBytes = imageBytes,
+                previewText = event.textPayload ?: "Deferred image",
+                fromRemote = true
+            )
+            deferredIncoming[event.eventId] = deferred
+            updateQueueCounts()
             addRecent(
-                NormalizedClipboard(
-                    event = event.copy(transferState = TransferState.DEFERRED),
-                    imageBytes = imageBytes,
-                    previewText = event.textPayload ?: "Deferred image",
-                    fromRemote = true
-                ),
+                deferred,
                 "Windows -> Android",
                 "Deferred"
             )
@@ -798,8 +959,18 @@ class SyncRepository(
         trigger: String,
         forceResend: Boolean
     ) {
-        if (isPrivacyPaused()) {
-            logger.warn("Skipped outbound sync because privacy pause is enabled")
+        if (!canSendOutbound("Outbound sync")) {
+            return
+        }
+
+        val rejection = policyRejectionReason(normalized)
+        if (rejection != null) {
+            logger.warn("Skipped ${normalized.event.eventId} from $trigger: $rejection")
+            addRecent(
+                normalized.copy(event = normalized.event.copy(transferState = TransferState.FAILED)),
+                "Android -> Windows",
+                "Filtered"
+            )
             return
         }
 
@@ -810,6 +981,11 @@ class SyncRepository(
         }
         if (!forceResend && lastQueuedLocalHash == hash) {
             logger.info("Skipped unchanged Android clipboard on $trigger")
+            return
+        }
+        if (syncMode() == SyncMode.ASK && !forceResend) {
+            addRecent(normalized, "Android -> Windows", "Staged")
+            logger.info("Staged ${normalized.event.eventId} from $trigger; resend it from history to send")
             return
         }
 
@@ -932,6 +1108,7 @@ class SyncRepository(
     }
 
     private fun addRecent(normalized: NormalizedClipboard, direction: String, status: String) {
+        recentPayloads[normalized.event.eventId] = normalized
         val model = RecentItemUiModel(
             eventId = normalized.event.eventId,
             contentType = normalized.event.contentType,
@@ -960,11 +1137,56 @@ class SyncRepository(
         )
     }
 
+    private fun canSendOutbound(action: String): Boolean {
+        if (!isSyncEnabled()) {
+            logger.warn("$action skipped because sync is disabled")
+            return false
+        }
+        if (isPrivacyPaused()) {
+            logger.warn("$action skipped because privacy pause is enabled")
+            return false
+        }
+        if (syncMode() == SyncMode.RECEIVE_ONLY) {
+            logger.warn("$action skipped because receive-only mode is enabled")
+            return false
+        }
+        return true
+    }
+
+    private fun canMirrorClipboardChange(): Boolean {
+        return isSyncEnabled() && !isPrivacyPaused() && syncMode() == SyncMode.MIRROR
+    }
+
+    private fun policyRejectionReason(normalized: NormalizedClipboard): String? {
+        return when (normalized.event.contentType) {
+            ContentType.TEXT -> if (allowTextSync()) null else "text sync is disabled"
+            ContentType.URL -> if (allowUrlSync()) null else "URL sync is disabled"
+            ContentType.IMAGE -> when {
+                !allowImageSync() -> "image sync is disabled"
+                normalized.event.payloadSizeBytes > maxImageSizeMb() * 1024L * 1024L -> "image is larger than ${maxImageSizeMb()} MB"
+                else -> null
+            }
+            ContentType.MIXED_UNSUPPORTED -> "mixed clipboard content is unsupported"
+        }
+    }
+
+    private fun updateQueueCounts() {
+        _uiState.value = _uiState.value.copy(
+            queuedOutboundCount = outboundQueue.size + pendingByEventId.size,
+            deferredIncomingCount = deferredIncoming.size
+        )
+    }
+
     private companion object {
         private const val KEY_SYNC_ENABLED = "sync_enabled"
         private const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
         private const val KEY_AUTO_SCREENSHOT_SYNC_ENABLED = "auto_screenshot_sync_enabled"
         private const val KEY_PRIVACY_PAUSED = "privacy_paused"
+        private const val KEY_SYNC_MODE = "sync_mode"
+        private const val KEY_ALLOW_TEXT_SYNC = "allow_text_sync"
+        private const val KEY_ALLOW_URL_SYNC = "allow_url_sync"
+        private const val KEY_ALLOW_IMAGE_SYNC = "allow_image_sync"
+        private const val KEY_MAX_IMAGE_SIZE_MB = "max_image_size_mb"
         private const val KEY_LAST_SCREENSHOT_ID = "last_screenshot_id"
         private const val CONFLICT_WINDOW_MILLIS = 1_500L
         private const val CLIPBOARD_CHANGE_DEBOUNCE_MS = 250L

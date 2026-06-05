@@ -44,9 +44,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.clipboardsync.android.protocol.ContentType
+import com.clipboardsync.android.protocol.TransferState
 import com.clipboardsync.android.protocol.TransportKind
 import com.clipboardsync.android.service.RecentItemUiModel
 import com.clipboardsync.android.service.SavedDeviceUiModel
+import com.clipboardsync.android.service.SyncMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,6 +95,22 @@ fun ClipboardSyncApp(
                     onSyncSmart = viewModel::onSyncSmart
                 )
             }
+            item {
+                SmartSyncCard(
+                    mode = state.syncMode,
+                    allowText = state.allowTextSync,
+                    allowUrl = state.allowUrlSync,
+                    allowImage = state.allowImageSync,
+                    maxImageSizeMb = state.maxImageSizeMb,
+                    queuedOutboundCount = state.queuedOutboundCount,
+                    deferredIncomingCount = state.deferredIncomingCount,
+                    onModeChanged = viewModel::onSyncModeChanged,
+                    onAllowTextChanged = viewModel::onAllowTextSyncChanged,
+                    onAllowUrlChanged = viewModel::onAllowUrlSyncChanged,
+                    onAllowImageChanged = viewModel::onAllowImageSyncChanged,
+                    onMaxImageSizeChanged = viewModel::onMaxImageSizeChanged
+                )
+            }
             item { GuidanceCard(state.guidance) }
             item {
                 PairingCard(
@@ -112,7 +130,12 @@ fun ClipboardSyncApp(
             item { LastItemCard(state.lastSyncedItem) }
             item { SectionTitle("Recent History") }
             items(state.recentItems, key = { it.eventId }) { item ->
-                RecentItemCard(item, onResend = { viewModel.onResendRecent(item.eventId) })
+                RecentItemCard(
+                    item = item,
+                    onResend = { viewModel.onResendRecent(item.eventId) },
+                    onRestore = { viewModel.onCopyRecentToClipboard(item.eventId) },
+                    onApplyDeferred = { viewModel.onApplyDeferredIncoming(item.eventId) }
+                )
             }
             item {
                 Row(
@@ -134,6 +157,58 @@ fun ClipboardSyncApp(
                 }
             }
             item { Spacer(modifier = Modifier.height(16.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun SmartSyncCard(
+    mode: SyncMode,
+    allowText: Boolean,
+    allowUrl: Boolean,
+    allowImage: Boolean,
+    maxImageSizeMb: Int,
+    queuedOutboundCount: Int,
+    deferredIncomingCount: Int,
+    onModeChanged: (SyncMode) -> Unit,
+    onAllowTextChanged: (Boolean) -> Unit,
+    onAllowUrlChanged: (Boolean) -> Unit,
+    onAllowImageChanged: (Boolean) -> Unit,
+    onMaxImageSizeChanged: (Int) -> Unit
+) {
+    FlatCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                SectionTitle("Smart Sync")
+                Text("Mode: ${mode.label}", style = MaterialTheme.typography.bodyMedium)
+                Text("Queued: $queuedOutboundCount  Deferred: $deferredIncomingCount", style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = { onModeChanged(mode.next()) }) {
+                Text("Change")
+            }
+        }
+
+        SettingRow("Text", "Allow plain text clipboard sends.", allowText, onAllowTextChanged)
+        SettingRow("URLs", "Allow links and web addresses.", allowUrl, onAllowUrlChanged)
+        SettingRow("Images", "Allow image transfers.", allowImage, onAllowImageChanged)
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Image Limit", style = MaterialTheme.typography.labelLarge)
+                Text("$maxImageSizeMb MB maximum", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onMaxImageSizeChanged(maxImageSizeMb - 5) }) { Text("-") }
+                TextButton(onClick = { onMaxImageSizeChanged(maxImageSizeMb + 5) }) { Text("+") }
+            }
         }
     }
 }
@@ -319,11 +394,26 @@ private fun LastItemCard(item: RecentItemUiModel?) {
 }
 
 @Composable
-private fun RecentItemCard(item: RecentItemUiModel, onResend: () -> Unit) {
+private fun RecentItemCard(
+    item: RecentItemUiModel,
+    onResend: () -> Unit,
+    onRestore: () -> Unit,
+    onApplyDeferred: () -> Unit
+) {
     FlatCard(background = MaterialTheme.colorScheme.surfaceVariant) {
         RecentItemBody(item)
-        TextButton(onClick = onResend) {
-            Text("Resend")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onRestore) {
+                Text("Copy here")
+            }
+            TextButton(onClick = onResend) {
+                Text("Send")
+            }
+            if (item.transferState == TransferState.DEFERRED || item.status == "Deferred") {
+                TextButton(onClick = onApplyDeferred) {
+                    Text("Apply")
+                }
+            }
         }
     }
 }
@@ -419,4 +509,9 @@ private fun SavedDeviceUiModel.statusLabel(): String = when {
     available -> "Available"
     selected -> "Selected"
     else -> "Saved"
+}
+
+private fun SyncMode.next(): SyncMode {
+    val values = SyncMode.entries
+    return values[(values.indexOf(this) + 1) % values.size]
 }

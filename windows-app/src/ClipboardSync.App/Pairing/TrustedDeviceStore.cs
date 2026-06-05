@@ -10,6 +10,11 @@ namespace ClipboardSync.App.Pairing;
 public sealed class AppSettings
 {
     public bool SyncEnabled { get; set; } = true;
+    public SyncMode SyncMode { get; set; } = SyncMode.MIRROR;
+    public bool AllowTextSync { get; set; } = true;
+    public bool AllowUrlSync { get; set; } = true;
+    public bool AllowImageSync { get; set; } = true;
+    public int MaxImageSizeMb { get; set; } = 25;
     public string DeviceId { get; set; } = CryptoUtils.UuidV7();
     public string DisplayName { get; set; } = Environment.MachineName;
     public string ServiceName { get; set; } = $"{Environment.MachineName}-clipboard-sync";

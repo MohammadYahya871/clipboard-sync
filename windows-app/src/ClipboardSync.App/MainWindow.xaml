@@ -63,19 +63,44 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="1"
-                                Width="168"
+                                Width="220"
                                 VerticalAlignment="Center">
                         <CheckBox Content="Sync enabled"
                                   IsChecked="{Binding SyncEnabled}"
                                   FontWeight="SemiBold" />
+                        <TextBlock Margin="0,10,0,0"
+                                   Text="{Binding SyncMode, StringFormat=Mode: {0}}"
+                                   FontWeight="SemiBold" />
+                        <Button Margin="0,8,0,0"
+                                Style="{StaticResource SecondaryButton}"
+                                Content="Change Mode"
+                                Command="{Binding NextSyncModeCommand}" />
+                        <Button Margin="0,8,0,0"
+                                Content="Send Clipboard Now"
+                                Command="{Binding SendCurrentClipboardCommand}" />
                         <Button Margin="0,12,0,0"
                                 Content="Reconnect"
                                 Command="{Binding ReconnectCommand}" />
+                        <CheckBox Margin="0,10,0,0" Content="Text" IsChecked="{Binding AllowTextSync}" />
+                        <CheckBox Content="URLs" IsChecked="{Binding AllowUrlSync}" />
+                        <CheckBox Content="Images" IsChecked="{Binding AllowImageSync}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Width="38"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Content="-"
+                                    Command="{Binding DecreaseImageLimitCommand}" />
+                            <TextBlock Margin="8,8,8,0"
+                                       Text="{Binding MaxImageSizeMb, StringFormat={}{0} MB}" />
+                            <Button Width="38"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Content="+"
+                                    Command="{Binding IncreaseImageLimitCommand}" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <UniformGrid Grid.Row="1" Margin="0,16,0,0" Columns="4">
+            <UniformGrid Grid.Row="1" Margin="0,16,0,0" Columns="5">
                 <Border Margin="0,0,10,0"
                         Padding="14"
                         CornerRadius="8"
@@ -112,7 +137,8 @@
                                    Style="{StaticResource MutedText}" />
                     </StackPanel>
                 </Border>
-                <Border Padding="14"
+                <Border Margin="0,0,10,0"
+                        Padding="14"
                         CornerRadius="8"
                         Background="{StaticResource PanelBrush}"
                         BorderBrush="{StaticResource BorderBrushSoft}"
@@ -120,6 +146,16 @@
                     <StackPanel>
                         <TextBlock Text="Transport" FontWeight="SemiBold" />
                         <TextBlock Margin="0,6,0,0" Text="{Binding TransportLabel}" Style="{StaticResource MutedText}" />
+                    </StackPanel>
+                </Border>
+                <Border Padding="14"
+                        CornerRadius="8"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushSoft}"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="Queue" FontWeight="SemiBold" />
+                        <TextBlock Margin="0,6,0,0" Text="{Binding QueueSummary}" Style="{StaticResource MutedText}" />
                     </StackPanel>
                 </Border>
             </UniformGrid>
@@ -238,8 +274,22 @@
                             <TextBlock Text="Recent History" Style="{StaticResource SectionTitle}" />
                             <TextBlock Text="Latest clipboard transfers and their delivery state."
                                        Style="{StaticResource MutedText}" />
+                            <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                                <Button Style="{StaticResource SecondaryButton}"
+                                        Content="Copy Here"
+                                        Command="{Binding RestoreRecentCommand}" />
+                                <Button Margin="8,0,0,0"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Content="Send"
+                                        Command="{Binding ResendRecentCommand}" />
+                                <Button Margin="8,0,0,0"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Content="Apply Deferred"
+                                        Command="{Binding ApplyDeferredCommand}" />
+                            </StackPanel>
                         </StackPanel>
                         <ListView ItemsSource="{Binding RecentItems}"
+                                  SelectedItem="{Binding SelectedRecentItem, Mode=TwoWay}"
                                   MinHeight="260">
                             <ListView.View>
                                 <GridView>

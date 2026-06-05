@@ -50,10 +50,22 @@ public partial class App
             _mainWindow = new MainWindow(viewModel, () => _explicitExitRequested, _logStore.Info);
             MainWindow = _mainWindow;
             _trayController = new TrayController();
+            _trayController.SetSyncEnabled(_coordinator.SyncEnabled);
+            _coordinator.StateChanged += (_, _) => _trayController?.SetSyncEnabled(_coordinator.SyncEnabled);
             _trayController.OpenRequested += (_, _) =>
             {
                 _logStore.Info("Tray requested main window open");
                 _mainWindow.ShowFromTray();
+            };
+            _trayController.SendClipboardRequested += async (_, _) =>
+            {
+                _logStore.Info("Tray requested manual clipboard send");
+                await _coordinator.SendCurrentClipboardNowAsync();
+            };
+            _trayController.ToggleSyncRequested += (_, _) =>
+            {
+                _coordinator.SyncEnabled = !_coordinator.SyncEnabled;
+                _trayController.SetSyncEnabled(_coordinator.SyncEnabled);
             };
             _trayController.ExitRequested += async (_, _) =>
             {

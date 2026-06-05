@@ -3,15 +3,19 @@
 local.properties
 **/build/
 captures/
-dist/android/*.apk
-dist/windows/*/
+dist/android/
+dist/windows/
+dist/release/
+dist/**/*.apk
+dist/**/*.aab
+dist/**/*.zip
 
 # Windows / .NET
 .dotnet/
 bin/
 obj/
 .vs/
-dist/windows/*.zip
+*.nupkg
 
 # OS / tooling
 .idea/

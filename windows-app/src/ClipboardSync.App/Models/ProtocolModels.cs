@@ -22,6 +22,15 @@ public enum TransferState
     DEFERRED
 }
 
+public enum SyncMode
+{
+    MIRROR,
+    MANUAL,
+    ASK,
+    RECEIVE_ONLY,
+    SEND_ONLY
+}
+
 public sealed record ImageMetadata(
     int Width,
     int Height,
