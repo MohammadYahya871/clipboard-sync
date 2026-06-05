@@ -61,12 +61,38 @@ if (-not $SkipWindows) {
         /p:DebugType=None `
         /p:DebugSymbols=false
 
+    $sourceIcon = Join-Path $repoRoot "windows-app\src\ClipboardSync.App\Assets\AppIcon.ico"
+    $stageIcon = Join-Path $windowsStageDir "Assets\AppIcon.ico"
+    if ((Test-Path -LiteralPath $sourceIcon) -and -not (Test-Path -LiteralPath $stageIcon)) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $stageIcon) -Force | Out-Null
+        Copy-Item -LiteralPath $sourceIcon -Destination $stageIcon -Force
+    }
+
     $zipDest = Join-Path $releaseDir "ClipboardSync-$Version-windows-x64.zip"
     if (Test-Path -LiteralPath $zipDest) {
         Remove-Item -LiteralPath $zipDest -Force
     }
 
     Compress-Archive -Path $windowsStageDir -DestinationPath $zipDest
+
+    $isccCandidates = @(
+        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 7\ISCC.exe"),
+        (Join-Path $env:ProgramFiles "Inno Setup 7\ISCC.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 7\ISCC.exe")
+    )
+    $iscc = $isccCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+    if ($iscc) {
+        $issPath = Join-Path $repoRoot "installer\ClipboardSync.iss"
+        & $iscc $issPath "/DMyAppVersion=$Version" "/DSourceDir=$windowsStageDir" "/DOutputDir=$releaseDir"
+        Write-Host "Windows installer written to $releaseDir"
+    }
+    else {
+        Write-Warning "Inno Setup not found. Install Inno Setup 6+ to build ClipboardSync-*-windows-x64-setup.exe"
+    }
 }
 
 $checksumPath = Join-Path $releaseDir "SHA256SUMS.txt"

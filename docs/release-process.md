@@ -41,6 +41,7 @@ Artifacts are written to `dist/release/vVERSION/`:
 
 - `ClipboardSync-VERSION-android-debug.apk`
 - `ClipboardSync-VERSION-windows-x64.zip`
+- `ClipboardSync-VERSION-windows-x64-setup.exe` (requires Inno Setup 6+ on the build machine)
 - `SHA256SUMS.txt`
 
 Generated release artifacts are not committed. Upload the files from the versioned release folder to GitHub Releases.

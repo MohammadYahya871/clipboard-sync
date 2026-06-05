@@ -9,6 +9,7 @@ namespace ClipboardSync.App.Pairing;
 
 public sealed class AppSettings
 {
+    public bool RunAtStartup { get; set; } = true;
     public bool SyncEnabled { get; set; } = true;
     public SyncMode SyncMode { get; set; } = SyncMode.MIRROR;
     public bool AllowTextSync { get; set; } = true;

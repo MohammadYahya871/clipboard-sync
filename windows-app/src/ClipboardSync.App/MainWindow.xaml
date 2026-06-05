@@ -68,6 +68,9 @@
                         <CheckBox Content="Sync enabled"
                                   IsChecked="{Binding SyncEnabled}"
                                   FontWeight="SemiBold" />
+                        <CheckBox Margin="0,8,0,0"
+                                  Content="Start with Windows"
+                                  IsChecked="{Binding RunAtStartup}" />
                         <TextBlock Margin="0,10,0,0"
                                    Text="{Binding SyncMode, StringFormat=Mode: {0}}"
                                    FontWeight="SemiBold" />

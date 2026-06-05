@@ -80,6 +80,16 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public bool RunAtStartup
+    {
+        get => _coordinator.RunAtStartup;
+        set
+        {
+            _coordinator.RunAtStartup = value;
+            RaiseAll();
+        }
+    }
+
     public SyncMode SyncMode
     {
         get => _coordinator.SyncMode;
@@ -187,6 +197,7 @@ public sealed class MainViewModel : ObservableObject
     private void RaiseAll()
     {
         RaisePropertyChanged(nameof(SyncEnabled));
+        RaisePropertyChanged(nameof(RunAtStartup));
         RaisePropertyChanged(nameof(SyncMode));
         RaisePropertyChanged(nameof(AllowTextSync));
         RaisePropertyChanged(nameof(AllowUrlSync));

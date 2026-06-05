@@ -91,6 +91,24 @@ public sealed class SyncCoordinator : IAsyncDisposable
         }
     }
 
+    public bool RunAtStartup
+    {
+        get => _settingsStore.Current.RunAtStartup;
+        set
+        {
+            if (_settingsStore.Current.RunAtStartup == value)
+            {
+                return;
+            }
+
+            _settingsStore.Current.RunAtStartup = value;
+            _settingsStore.Save();
+            StartupRegistration.Apply(value);
+            _logStore.Info($"Windows run at startup set to {value}");
+            OnStateChanged();
+        }
+    }
+
     public SyncMode SyncMode
     {
         get => _settingsStore.Current.SyncMode;
@@ -171,6 +189,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
         _clipboardMonitor.ClipboardUpdated += OnClipboardUpdated;
         _connectionLabel = "Listening";
         RefreshSavedDevices();
+        ApplyStartupRegistration();
         OnStateChanged();
         await _lanServer.StartAsync(HandleEnvelopeAsync, _cts.Token);
         await _lanDiscoveryResponder.StartAsync(_cts.Token);
@@ -756,6 +775,26 @@ public sealed class SyncCoordinator : IAsyncDisposable
             ContentType.MIXED_UNSUPPORTED => "mixed clipboard content is unsupported",
             _ => null
         };
+    }
+
+    private void ApplyStartupRegistration()
+    {
+        if (_settingsStore.Current.RunAtStartup)
+        {
+            if (!StartupRegistration.IsEnabled())
+            {
+                StartupRegistration.Apply(true);
+                _logStore.Info("Applied Windows startup registration");
+            }
+
+            return;
+        }
+
+        if (StartupRegistration.IsEnabled())
+        {
+            StartupRegistration.Apply(false);
+            _logStore.Info("Removed Windows startup registration");
+        }
     }
 
     private void SetPolicyValue(bool current, bool next, Action<bool> assign, string label)
