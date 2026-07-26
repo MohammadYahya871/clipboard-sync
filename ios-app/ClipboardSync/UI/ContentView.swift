@@ -7,23 +7,35 @@ struct ContentView: View {
     @ObservedObject var repository: SyncRepository
     @State private var showingScanner = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var actionFeedback = "Ready"
 
     var body: some View {
         NavigationStack {
             List {
                 StatusSection(
                     state: repository.uiState,
+                    actionFeedback: actionFeedback,
                     onSyncEnabledChanged: repository.setSyncEnabled,
                     onNotificationEnabledChanged: repository.setNotificationEnabled,
                     onAutoScreenshotSyncChanged: repository.setAutoScreenshotSyncEnabled,
                     onPrivacyPausedChanged: repository.setPrivacyPaused,
-                    onReconnect: { repository.reconnect(force: true) },
-                    onSyncSmart: { repository.syncSmartNow() },
-                    onSyncScreenshot: { repository.syncLatestScreenshotNow() },
+                    onReconnect: {
+                        actionFeedback = "Reconnecting..."
+                        repository.reconnect(force: true)
+                    },
+                    onSyncSmart: {
+                        actionFeedback = "Sync request sent."
+                        repository.syncSmartNow()
+                    },
+                    onSyncScreenshot: {
+                        actionFeedback = "Latest screenshot sync requested."
+                        repository.syncLatestScreenshotNow()
+                    },
                     selectedPhotoItem: $selectedPhotoItem
                 )
 
                 Section {
+                    Label(readinessSummary(repository.uiState), systemImage: "checklist")
                     Label(repository.uiState.guidance, systemImage: "info.circle")
                 }
 
@@ -31,7 +43,10 @@ struct ContentView: View {
                     payload: repository.uiState.manualPairingPayload,
                     onPayloadChanged: repository.updateManualPairingPayload,
                     onScanPairingQr: { showingScanner = true },
-                    onPair: { repository.pair(encodedPayload: repository.uiState.manualPairingPayload) }
+                    onPair: {
+                        actionFeedback = "Pairing with pasted payload."
+                        repository.pair(encodedPayload: repository.uiState.manualPairingPayload)
+                    }
                 )
 
                 SavedDevicesSection(
@@ -42,7 +57,10 @@ struct ContentView: View {
 
                 Section("Last Synced Item") {
                     if let item = repository.uiState.lastSyncedItem {
-                        RecentItemRow(item: item, onResend: { repository.resendRecent(eventId: item.eventId) })
+                        RecentItemRow(item: item, onResend: {
+                            actionFeedback = "History item queued."
+                            repository.resendRecent(eventId: item.eventId)
+                        })
                     } else {
                         Text("No clipboard item synced yet.")
                     }
@@ -50,26 +68,35 @@ struct ContentView: View {
 
                 Section("Recent History") {
                     ForEach(repository.uiState.recentItems) { item in
-                        RecentItemRow(item: item, onResend: { repository.resendRecent(eventId: item.eventId) })
+                        RecentItemRow(item: item, onResend: {
+                            actionFeedback = "History item queued."
+                            repository.resendRecent(eventId: item.eventId)
+                        })
                     }
                 }
 
-                Section {
-                    HStack {
-                        Button("Clear") { repository.clearLogs() }
-                        Spacer()
-                        Button("Copy report") { repository.copyDebugReport() }
-                    }
-                    ForEach(repository.uiState.logs) { log in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(log.level.rawValue)  \(log.timestampUtc)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(log.message)
+                Section("Diagnostics") {
+                    DisclosureGroup("Connection and transfer events") {
+                        HStack {
+                            Button("Clear") {
+                                actionFeedback = "Diagnostics cleared."
+                                repository.clearLogs()
+                            }
+                            Spacer()
+                            Button("Copy report") {
+                                actionFeedback = "Debug report copied."
+                                repository.copyDebugReport()
+                            }
+                        }
+                        ForEach(repository.uiState.logs) { log in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(log.level.rawValue)  \(log.timestampUtc)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(log.message)
+                            }
                         }
                     }
-                } header: {
-                    Text("Diagnostics")
                 }
             }
             .navigationTitle("Clipboard Sync")
@@ -78,6 +105,7 @@ struct ContentView: View {
                     showingScanner = false
                     repository.updateManualPairingPayload(payload)
                     repository.pair(encodedPayload: payload)
+                    actionFeedback = "Paired with scanned QR."
                 }
             }
             .onChange(of: selectedPhotoItem) { _, item in
@@ -87,6 +115,7 @@ struct ContentView: View {
                        let image = UIImage(data: data) {
                         await MainActor.run {
                             repository.syncImage(image, trigger: "photo-picker")
+                            actionFeedback = "Photo sync requested."
                             selectedPhotoItem = nil
                         }
                     }
@@ -98,6 +127,7 @@ struct ContentView: View {
 
 private struct StatusSection: View {
     var state: SyncUiState
+    var actionFeedback: String
     var onSyncEnabledChanged: (Bool) -> Void
     var onNotificationEnabledChanged: (Bool) -> Void
     var onAutoScreenshotSyncChanged: (Bool) -> Void
@@ -110,13 +140,16 @@ private struct StatusSection: View {
     var body: some View {
         Section {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Paired Device")
+                Text(connectionHealth(state))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(state.pairedDeviceLabel)
                     .font(.headline)
                 Text("Connection: \(state.connectionLabel)")
                 Text("Transport: \(state.transportKind.label)")
+                Text(actionFeedback)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Toggle("Sync Enabled", isOn: Binding(get: { state.syncEnabled }, set: onSyncEnabledChanged))
@@ -151,7 +184,7 @@ private struct PairingSection: View {
 
     var body: some View {
         Section("Pair with Windows") {
-            Text("Scan the QR code shown on the Windows app, or paste the pairing payload.")
+            Text("Scan the QR code shown on the desktop app. Paste the pairing payload only if scanning is not available.")
             HStack {
                 Button(action: onScanPairingQr) {
                     Label("Scan QR", systemImage: "qrcode.viewfinder")
@@ -166,6 +199,25 @@ private struct PairingSection: View {
                 .autocorrectionDisabled()
         }
     }
+}
+
+private func connectionHealth(_ state: SyncUiState) -> String {
+    if !state.syncEnabled { return "Sync paused" }
+    if state.pairedDeviceLabel.localizedCaseInsensitiveContains("not paired") { return "Pairing needed" }
+    if state.connectionLabel.localizedCaseInsensitiveContains("connected") { return "Connected" }
+    if state.connectionLabel.localizedCaseInsensitiveContains("connecting") ||
+        state.connectionLabel.localizedCaseInsensitiveContains("searching") {
+        return "Searching"
+    }
+    return "Paired but offline"
+}
+
+private func readinessSummary(_ state: SyncUiState) -> String {
+    let pairing = state.pairedDeviceLabel.localizedCaseInsensitiveContains("not paired")
+        ? "Pair a desktop to start."
+        : "Trusted device saved."
+    let enabled = state.syncEnabled ? "Sync is enabled." : "Sync is paused."
+    return "\(pairing) \(enabled) iOS sends are intentionally user-initiated."
 }
 
 private struct SavedDevicesSection: View {

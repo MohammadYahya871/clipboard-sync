@@ -5,6 +5,27 @@
              Name="ClipboardSync.Linux">
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="Border.panel">
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.statusBadge">
+      <Setter Property="Background" Value="{DynamicResource SystemAccentColorDark2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.deviceBadge">
+      <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseMediumBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.statusBadge TextBlock">
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Border.deviceBadge TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+    </Style>
   </Application.Styles>
 
   <TrayIcon.Icons>

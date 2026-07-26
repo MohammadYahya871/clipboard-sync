@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,10 +26,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +41,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -50,6 +56,7 @@ import com.clipboardsync.android.service.RecentItemUiModel
 import com.clipboardsync.android.service.SavedDeviceUiModel
 import com.clipboardsync.android.protocol.NearbyHostUiModel
 import com.clipboardsync.android.service.SyncMode
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,9 +66,17 @@ fun ClipboardSyncApp(
     onNotificationEnabledToggle: (Boolean) -> Unit = viewModel::onNotificationEnabledChanged
 ) {
     val state by viewModel.state.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    fun announce(message: String, action: () -> Unit) {
+        action()
+        scope.launch { snackbarHostState.showSnackbar(message) }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Clipboard Sync", fontWeight = FontWeight.SemiBold) },
@@ -92,8 +107,8 @@ fun ClipboardSyncApp(
                     onNotificationEnabledChanged = onNotificationEnabledToggle,
                     onAutoScreenshotSyncChanged = viewModel::onAutoScreenshotSyncChanged,
                     onPrivacyPausedChanged = viewModel::onPrivacyPausedChanged,
-                    onReconnect = viewModel::onReconnect,
-                    onSyncSmart = viewModel::onSyncSmart
+                    onReconnect = { announce("Reconnecting…", viewModel::onReconnect) },
+                    onSyncSmart = { announce("Sync request sent", viewModel::onSyncSmart) }
                 )
             }
             item {
@@ -120,16 +135,16 @@ fun ClipboardSyncApp(
                     nearbyScanInProgress = state.nearbyScanInProgress,
                     onPayloadChanged = viewModel::onManualPayloadChanged,
                     onScanPairingQr = onScanPairingQr,
-                    onFindNearby = viewModel::onFindNearbyHosts,
-                    onPairNearby = viewModel::onPairNearbyHost,
-                    onPair = { viewModel.onPair(state.manualPairingPayload) }
+                    onFindNearby = { announce("Scanning for nearby PCs…", viewModel::onFindNearbyHosts) },
+                    onPairNearby = { encodedPayload -> announce("Pairing with selected PC") { viewModel.onPairNearbyHost(encodedPayload) } },
+                    onPair = { announce("Pairing with pasted payload") { viewModel.onPair(state.manualPairingPayload) } }
                 )
             }
             item {
                 SavedDevicesCard(
                     devices = state.savedDevices,
-                    onScan = viewModel::onScanSavedDevices,
-                    onSelect = viewModel::onSelectSavedDevice
+                    onScan = { announce("Scanning saved devices…", viewModel::onScanSavedDevices) },
+                    onSelect = { deviceId -> announce("Connecting to saved device…") { viewModel.onSelectSavedDevice(deviceId) } }
                 )
             }
             item { LastItemCard(state.lastSyncedItem) }
@@ -137,9 +152,9 @@ fun ClipboardSyncApp(
             items(state.recentItems, key = { it.eventId }) { item ->
                 RecentItemCard(
                     item = item,
-                    onResend = { viewModel.onResendRecent(item.eventId) },
-                    onRestore = { viewModel.onCopyRecentToClipboard(item.eventId) },
-                    onApplyDeferred = { viewModel.onApplyDeferredIncoming(item.eventId) }
+                    onResend = { announce("History item queued") { viewModel.onResendRecent(item.eventId) } },
+                    onRestore = { announce("Copied selected item here") { viewModel.onCopyRecentToClipboard(item.eventId) } },
+                    onApplyDeferred = { announce("Deferred item applied") { viewModel.onApplyDeferredIncoming(item.eventId) } }
                 )
             }
             item {
@@ -150,8 +165,8 @@ fun ClipboardSyncApp(
                 ) {
                     SectionTitle("Diagnostics")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = viewModel::onClearLogs) { Text("Clear") }
-                        TextButton(onClick = viewModel::onCopyDebugReport) { Text("Copy report") }
+                        TextButton(onClick = { announce("Diagnostics cleared", viewModel::onClearLogs) }) { Text("Clear") }
+                        TextButton(onClick = { announce("Debug report copied", viewModel::onCopyDebugReport) }) { Text("Copy report") }
                     }
                 }
             }
@@ -166,6 +181,7 @@ fun ClipboardSyncApp(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SmartSyncCard(
     mode: SyncMode,
@@ -190,10 +206,18 @@ private fun SmartSyncCard(
             Column(modifier = Modifier.weight(1f)) {
                 SectionTitle("Smart Sync")
                 Text("Mode: ${mode.label}", style = MaterialTheme.typography.bodyMedium)
+                Text(mode.description(), style = MaterialTheme.typography.bodySmall)
                 Text("Queued: $queuedOutboundCount  Deferred: $deferredIncomingCount", style = MaterialTheme.typography.bodySmall)
             }
-            TextButton(onClick = { onModeChanged(mode.next()) }) {
-                Text("Change")
+        }
+
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(SyncMode.entries, key = { it.name }) { option ->
+                FilterChip(
+                    selected = option == mode,
+                    onClick = { onModeChanged(option) },
+                    label = { Text(option.label) }
+                )
             }
         }
 
@@ -241,10 +265,11 @@ private fun StatusCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Paired Device", style = MaterialTheme.typography.labelLarge)
+                Text(connectionHealth(syncEnabled, pairedDevice, connectionLabel), style = MaterialTheme.typography.labelLarge)
                 Text(pairedDevice, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("Connection: $connectionLabel", style = MaterialTheme.typography.bodyMedium)
                 Text("Transport: ${transport.label()}", style = MaterialTheme.typography.bodyMedium)
+                Text(readinessSummary(syncEnabled, pairedDevice), style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = syncEnabled, onCheckedChange = onSyncEnabledChanged)
         }
@@ -538,7 +563,29 @@ private fun SavedDeviceUiModel.statusLabel(): String = when {
     else -> "Saved"
 }
 
-private fun SyncMode.next(): SyncMode {
-    val values = SyncMode.entries
-    return values[(values.indexOf(this) + 1) % values.size]
+private fun SyncMode.description(): String = when (this) {
+    SyncMode.MIRROR -> "Automatically mirrors supported clipboard changes when Android allows it."
+    SyncMode.MANUAL -> "Only sends from Sync now, notification actions, Quick Settings, or sharing."
+    SyncMode.ASK -> "Stages detected items in history so you can choose what to send."
+    SyncMode.RECEIVE_ONLY -> "Receives incoming items but does not send this phone's clipboard."
+    SyncMode.SEND_ONLY -> "Sends outbound items but does not write incoming items to this clipboard."
+}
+
+private fun connectionHealth(syncEnabled: Boolean, pairedDevice: String, connectionLabel: String): String = when {
+    !syncEnabled -> "Sync paused"
+    pairedDevice.contains("not paired", ignoreCase = true) -> "Pairing needed"
+    connectionLabel.contains("connected", ignoreCase = true) -> "Connected"
+    connectionLabel.contains("connecting", ignoreCase = true) ||
+        connectionLabel.contains("searching", ignoreCase = true) -> "Searching"
+    else -> "Paired but offline"
+}
+
+private fun readinessSummary(syncEnabled: Boolean, pairedDevice: String): String {
+    val pairing = if (pairedDevice.contains("not paired", ignoreCase = true)) {
+        "Pair a PC to start."
+    } else {
+        "Trusted device saved."
+    }
+    val enabled = if (syncEnabled) "Sync is enabled." else "Sync is paused."
+    return "$pairing $enabled Keep notification active for hidden sync."
 }

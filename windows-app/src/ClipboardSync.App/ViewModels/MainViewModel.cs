@@ -15,54 +15,103 @@ public sealed class MainViewModel : ObservableObject
     private readonly SyncCoordinator _coordinator;
     private SavedDeviceItem? _selectedSavedDevice;
     private RecentClipboardItem? _selectedRecentItem;
+    private string _lastActionFeedback = "Ready";
 
     public MainViewModel(SyncCoordinator coordinator)
     {
         _coordinator = coordinator;
         _coordinator.StateChanged += (_, _) => RaiseAll();
-        CopyPairingPayloadCommand = new RelayCommand(_coordinator.CopyPairingPayloadToClipboard);
+        CopyPairingPayloadCommand = new RelayCommand(() =>
+        {
+            _coordinator.CopyPairingPayloadToClipboard();
+            LastActionFeedback = "Pairing payload copied.";
+        });
         RegeneratePairingCodeCommand = new RelayCommand(() =>
         {
             _coordinator.RegeneratePairingCode();
+            LastActionFeedback = "New pairing code generated.";
             RaiseAll();
         });
         ReconnectCommand = new RelayCommand(() =>
         {
             _coordinator.ManualReconnect();
+            LastActionFeedback = "Reconnecting...";
             RaiseAll();
         });
         ConnectSavedDeviceCommand = new RelayCommand(() =>
         {
             _coordinator.SelectSavedDevice(SelectedSavedDevice);
+            LastActionFeedback = SelectedSavedDevice is null ? "Select a saved device first." : $"Connecting to {SelectedSavedDevice.DisplayName}...";
             RaiseAll();
         });
-        ClearLogsCommand = new RelayCommand(_coordinator.ClearLogs);
-        SendCurrentClipboardCommand = new RelayCommand(async () => await _coordinator.SendCurrentClipboardNowAsync());
+        ClearLogsCommand = new RelayCommand(() =>
+        {
+            _coordinator.ClearLogs();
+            LastActionFeedback = "Diagnostics cleared.";
+        });
+        SendCurrentClipboardCommand = new RelayCommand(async () =>
+        {
+            LastActionFeedback = "Sending current clipboard...";
+            await _coordinator.SendCurrentClipboardNowAsync();
+            LastActionFeedback = "Sync request sent.";
+        });
         ResendRecentCommand = new RelayCommand(async () =>
         {
             if (SelectedRecentItem is not null)
             {
+                LastActionFeedback = "Sending selected history item...";
                 await _coordinator.ResendRecentAsync(SelectedRecentItem.EventId);
+                LastActionFeedback = "History item queued.";
+            }
+            else
+            {
+                LastActionFeedback = "Select a history item first.";
             }
         });
         RestoreRecentCommand = new RelayCommand(async () =>
         {
             if (SelectedRecentItem is not null)
             {
+                LastActionFeedback = "Copying selected item here...";
                 await _coordinator.RestoreRecentToClipboardAsync(SelectedRecentItem.EventId);
+                LastActionFeedback = "Selected item copied here.";
+            }
+            else
+            {
+                LastActionFeedback = "Select a history item first.";
             }
         });
         ApplyDeferredCommand = new RelayCommand(async () =>
         {
             if (SelectedRecentItem is not null)
             {
+                LastActionFeedback = "Applying deferred item...";
                 await _coordinator.ApplyDeferredIncomingAsync(SelectedRecentItem.EventId);
+                LastActionFeedback = "Deferred item applied.";
+            }
+            else
+            {
+                LastActionFeedback = "Select a deferred history item first.";
             }
         });
-        NextSyncModeCommand = new RelayCommand(() => SyncMode = NextMode(SyncMode));
-        DecreaseImageLimitCommand = new RelayCommand(() => MaxImageSizeMb -= 5);
-        IncreaseImageLimitCommand = new RelayCommand(() => MaxImageSizeMb += 5);
+        NextSyncModeCommand = new RelayCommand(() =>
+        {
+            SyncMode = NextMode(SyncMode);
+            LastActionFeedback = $"Sync mode set to {SyncModeLabel}.";
+        });
+        DecreaseImageLimitCommand = new RelayCommand(() =>
+        {
+            MaxImageSizeMb -= 5;
+            LastActionFeedback = $"Image limit set to {MaxImageSizeMb} MB.";
+        });
+        IncreaseImageLimitCommand = new RelayCommand(() =>
+        {
+            MaxImageSizeMb += 5;
+            LastActionFeedback = $"Image limit set to {MaxImageSizeMb} MB.";
+        });
     }
+
+    public SyncMode[] SyncModes { get; } = Enum.GetValues<SyncMode>();
 
     public ObservableCollection<RecentClipboardItem> RecentItems => _coordinator.RecentItems;
 
@@ -158,6 +207,98 @@ public sealed class MainViewModel : ObservableObject
 
     public string QueueSummary => _coordinator.QueueSummary;
 
+    public string LastActionFeedback
+    {
+        get => _lastActionFeedback;
+        private set => SetProperty(ref _lastActionFeedback, value);
+    }
+
+    public string ConnectionHealthLabel
+    {
+        get
+        {
+            if (!SyncEnabled)
+            {
+                return "Sync paused";
+            }
+
+            if (PairedDeviceLabel.Contains("Not paired", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Pairing needed";
+            }
+
+            if (ConnectionLabel.Contains("Connected", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Connected";
+            }
+
+            if (ConnectionLabel.Contains("Connecting", StringComparison.OrdinalIgnoreCase) ||
+                ConnectionLabel.Contains("Searching", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Searching";
+            }
+
+            return "Paired but offline";
+        }
+    }
+
+    public string ReadinessSummary
+    {
+        get
+        {
+            var pairing = PairedDeviceLabel.Contains("Not paired", StringComparison.OrdinalIgnoreCase)
+                ? "Pair a phone to start."
+                : "Trusted device saved.";
+            var enabled = SyncEnabled ? "Sync is enabled." : "Sync is paused.";
+            var content = $"Allowed: {AllowedContentSummary}.";
+            return $"{pairing} {enabled} {content}";
+        }
+    }
+
+    public string SyncModeLabel => SyncMode switch
+    {
+        SyncMode.MIRROR => "Mirror",
+        SyncMode.MANUAL => "Manual",
+        SyncMode.ASK => "Ask",
+        SyncMode.RECEIVE_ONLY => "Receive only",
+        SyncMode.SEND_ONLY => "Send only",
+        _ => SyncMode.ToString()
+    };
+
+    public string SyncModeDescription => SyncMode switch
+    {
+        SyncMode.MIRROR => "Automatically mirrors supported clipboard changes when the platform allows it.",
+        SyncMode.MANUAL => "Only sends when you use Sync now, tray actions, notification actions, or sharing.",
+        SyncMode.ASK => "Stages detected items in history so you can choose what to send.",
+        SyncMode.RECEIVE_ONLY => "Receives incoming items but does not send this computer's clipboard.",
+        SyncMode.SEND_ONLY => "Sends outbound items but does not write incoming items to this clipboard.",
+        _ => string.Empty
+    };
+
+    public string AllowedContentSummary
+    {
+        get
+        {
+            var allowed = new List<string>();
+            if (AllowTextSync)
+            {
+                allowed.Add("text");
+            }
+
+            if (AllowUrlSync)
+            {
+                allowed.Add("URLs");
+            }
+
+            if (AllowImageSync)
+            {
+                allowed.Add($"images up to {MaxImageSizeMb} MB");
+            }
+
+            return allowed.Count == 0 ? "nothing" : string.Join(", ", allowed);
+        }
+    }
+
     public SavedDeviceItem? SelectedSavedDevice
     {
         get => _selectedSavedDevice;
@@ -213,6 +354,11 @@ public sealed class MainViewModel : ObservableObject
         RaisePropertyChanged(nameof(LastItemSummary));
         RaisePropertyChanged(nameof(QueueSummary));
         RaisePropertyChanged(nameof(SavedDevices));
+        RaisePropertyChanged(nameof(ConnectionHealthLabel));
+        RaisePropertyChanged(nameof(ReadinessSummary));
+        RaisePropertyChanged(nameof(SyncModeLabel));
+        RaisePropertyChanged(nameof(SyncModeDescription));
+        RaisePropertyChanged(nameof(AllowedContentSummary));
     }
 
     private static SyncMode NextMode(SyncMode mode)
@@ -238,4 +384,3 @@ public sealed class MainViewModel : ObservableObject
         return image;
     }
 }
-

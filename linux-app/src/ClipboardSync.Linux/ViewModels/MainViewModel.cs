@@ -27,6 +27,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private RecentClipboardItem? _selectedRecentItem;
 
+    [ObservableProperty]
+    private string _lastActionFeedback = "Ready";
+
     public MainViewModel(SyncCoordinator coordinator)
     {
         _coordinator = coordinator;
@@ -140,6 +143,92 @@ public partial class MainViewModel : ViewModelBase
     public string LastItemSummary => _coordinator.LastItemSummary;
     public string QueueSummary => _coordinator.QueueSummary;
     public string PairingPayload => _coordinator.PairingPayload;
+    public SyncMode[] SyncModes { get; } = Enum.GetValues<SyncMode>();
+
+    public string ConnectionHealthLabel
+    {
+        get
+        {
+            if (!SyncEnabled)
+            {
+                return "Sync paused";
+            }
+
+            if (PairedDeviceLabel.Contains("Not paired", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Pairing needed";
+            }
+
+            if (ConnectionLabel.Contains("Connected", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Connected";
+            }
+
+            if (ConnectionLabel.Contains("Connecting", StringComparison.OrdinalIgnoreCase) ||
+                ConnectionLabel.Contains("Searching", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Searching";
+            }
+
+            return "Paired but offline";
+        }
+    }
+
+    public string ReadinessSummary
+    {
+        get
+        {
+            var pairing = PairedDeviceLabel.Contains("Not paired", StringComparison.OrdinalIgnoreCase)
+                ? "Pair a phone to start."
+                : "Trusted device saved.";
+            var enabled = SyncEnabled ? "Sync is enabled." : "Sync is paused.";
+            return $"{pairing} {enabled} Allowed: {AllowedContentSummary}.";
+        }
+    }
+
+    public string SyncModeLabel => SyncMode switch
+    {
+        SyncMode.MIRROR => "Mirror",
+        SyncMode.MANUAL => "Manual",
+        SyncMode.ASK => "Ask",
+        SyncMode.RECEIVE_ONLY => "Receive only",
+        SyncMode.SEND_ONLY => "Send only",
+        _ => SyncMode.ToString()
+    };
+
+    public string SyncModeDescription => SyncMode switch
+    {
+        SyncMode.MIRROR => "Automatically mirrors supported clipboard changes when the platform allows it.",
+        SyncMode.MANUAL => "Only sends when you use Sync now, tray actions, notification actions, or sharing.",
+        SyncMode.ASK => "Stages detected items in history so you can choose what to send.",
+        SyncMode.RECEIVE_ONLY => "Receives incoming items but does not send this computer's clipboard.",
+        SyncMode.SEND_ONLY => "Sends outbound items but does not write incoming items to this clipboard.",
+        _ => string.Empty
+    };
+
+    public string AllowedContentSummary
+    {
+        get
+        {
+            var allowed = new List<string>();
+            if (AllowTextSync)
+            {
+                allowed.Add("text");
+            }
+
+            if (AllowUrlSync)
+            {
+                allowed.Add("URLs");
+            }
+
+            if (AllowImageSync)
+            {
+                allowed.Add($"images up to {MaxImageSizeMb} MB");
+            }
+
+            return allowed.Count == 0 ? "nothing" : string.Join(", ", allowed);
+        }
+    }
 
     public Bitmap PairingQrCodeImage
     {
@@ -160,12 +249,17 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task CopyPairingPayloadAsync() => await _coordinator.CopyPairingPayloadToClipboardAsync();
+    private async Task CopyPairingPayloadAsync()
+    {
+        await _coordinator.CopyPairingPayloadToClipboardAsync();
+        LastActionFeedback = "Pairing payload copied.";
+    }
 
     [RelayCommand]
     private void RegeneratePairingCode()
     {
         _coordinator.RegeneratePairingCode();
+        LastActionFeedback = "New pairing code generated.";
         _cachedQrPayload = null;
         RaiseSettings();
         OnPropertyChanged(nameof(PairingQrCodeImage));
@@ -175,6 +269,7 @@ public partial class MainViewModel : ViewModelBase
     private void Reconnect()
     {
         _coordinator.ManualReconnect();
+        LastActionFeedback = "Reconnecting...";
         RaiseStatus();
     }
 
@@ -182,11 +277,16 @@ public partial class MainViewModel : ViewModelBase
     private void ConnectSavedDevice()
     {
         _coordinator.SelectSavedDevice(SelectedSavedDevice);
+        LastActionFeedback = SelectedSavedDevice is null ? "Select a saved device first." : $"Connecting to {SelectedSavedDevice.DisplayName}...";
         RaiseStatus();
     }
 
     [RelayCommand]
-    private void ClearLogs() => _coordinator.ClearLogs();
+    private void ClearLogs()
+    {
+        _coordinator.ClearLogs();
+        LastActionFeedback = "Diagnostics cleared.";
+    }
 
     [RelayCommand]
     private void OpenLogFile()
@@ -205,14 +305,25 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task SendCurrentClipboardAsync() => await _coordinator.SendCurrentClipboardNowAsync();
+    private async Task SendCurrentClipboardAsync()
+    {
+        LastActionFeedback = "Sending current clipboard...";
+        await _coordinator.SendCurrentClipboardNowAsync();
+        LastActionFeedback = "Sync request sent.";
+    }
 
     [RelayCommand]
     private async Task ResendRecentAsync()
     {
         if (SelectedRecentItem is not null)
         {
+            LastActionFeedback = "Sending selected history item...";
             await _coordinator.ResendRecentAsync(SelectedRecentItem.EventId);
+            LastActionFeedback = "History item queued.";
+        }
+        else
+        {
+            LastActionFeedback = "Select a history item first.";
         }
     }
 
@@ -221,7 +332,13 @@ public partial class MainViewModel : ViewModelBase
     {
         if (SelectedRecentItem is not null)
         {
+            LastActionFeedback = "Copying selected item here...";
             await _coordinator.RestoreRecentToClipboardAsync(SelectedRecentItem.EventId);
+            LastActionFeedback = "Selected item copied here.";
+        }
+        else
+        {
+            LastActionFeedback = "Select a history item first.";
         }
     }
 
@@ -230,7 +347,13 @@ public partial class MainViewModel : ViewModelBase
     {
         if (SelectedRecentItem is not null)
         {
+            LastActionFeedback = "Applying deferred item...";
             await _coordinator.ApplyDeferredIncomingAsync(SelectedRecentItem.EventId);
+            LastActionFeedback = "Deferred item applied.";
+        }
+        else
+        {
+            LastActionFeedback = "Select a deferred history item first.";
         }
     }
 
@@ -238,13 +361,22 @@ public partial class MainViewModel : ViewModelBase
     private void NextSyncMode()
     {
         SyncMode = NextMode(SyncMode);
+        LastActionFeedback = $"Sync mode set to {SyncModeLabel}.";
     }
 
     [RelayCommand]
-    private void DecreaseImageLimit() => MaxImageSizeMb -= 5;
+    private void DecreaseImageLimit()
+    {
+        MaxImageSizeMb -= 5;
+        LastActionFeedback = $"Image limit set to {MaxImageSizeMb} MB.";
+    }
 
     [RelayCommand]
-    private void IncreaseImageLimit() => MaxImageSizeMb += 5;
+    private void IncreaseImageLimit()
+    {
+        MaxImageSizeMb += 5;
+        LastActionFeedback = $"Image limit set to {MaxImageSizeMb} MB.";
+    }
 
     /// <summary>Status/connection/last-item only — never rebinds the QR image.</summary>
     private void RaiseStatus()
@@ -263,6 +395,8 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(LastItemSummary));
         OnPropertyChanged(nameof(QueueSummary));
         OnPropertyChanged(nameof(GuidanceText));
+        OnPropertyChanged(nameof(ConnectionHealthLabel));
+        OnPropertyChanged(nameof(ReadinessSummary));
     }
 
     private void RaiseSettings()
@@ -277,6 +411,11 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(MaxImageSizeMb));
         OnPropertyChanged(nameof(GuidanceText));
         OnPropertyChanged(nameof(PairingPayload));
+        OnPropertyChanged(nameof(ConnectionHealthLabel));
+        OnPropertyChanged(nameof(ReadinessSummary));
+        OnPropertyChanged(nameof(SyncModeLabel));
+        OnPropertyChanged(nameof(SyncModeDescription));
+        OnPropertyChanged(nameof(AllowedContentSummary));
         RaiseStatus();
     }
 
