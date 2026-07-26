@@ -6,6 +6,7 @@ captures/
 dist/android/
 dist/windows/
 dist/release/
+linux-app/dist/
 dist/**/*.apk
 dist/**/*.aab
 dist/**/*.zip

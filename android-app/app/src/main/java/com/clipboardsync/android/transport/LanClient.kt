@@ -9,12 +9,11 @@ import com.clipboardsync.android.protocol.ProtocolJson
 import com.clipboardsync.android.protocol.TransferChunk
 import com.clipboardsync.android.protocol.TransferDescriptor
 import com.clipboardsync.android.storage.CryptoUtils
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -42,18 +41,20 @@ class LanClient(
     private val _state = MutableStateFlow(LanConnectionState.DISCONNECTED)
     val state = _state.asStateFlow()
 
-    private val _incoming = MutableSharedFlow<ProtocolEnvelope>(
-        replay = 0,
-        extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    val incoming = _incoming.asSharedFlow()
+    // Unlimited: a single screenshot is offer+begin+dozens of chunks+complete.
+    // A bounded DROP_OLDEST buffer silently ate chunks and broke image sync.
+    private val incomingChannel = Channel<ProtocolEnvelope>(Channel.UNLIMITED)
+    val incoming = incomingChannel.receiveAsFlow()
 
     private var client: OkHttpClient? = null
     private var webSocket: WebSocket? = null
 
     fun connect(peer: TrustedPeer, localDeviceId: String) {
         disconnect()
+        // Drain any stale envelopes from a previous socket.
+        while (incomingChannel.tryReceive().isSuccess) {
+            // drop
+        }
         _state.value = LanConnectionState.CONNECTING
         val trustManager = FingerprintTrustManager(peer.certificateSha256)
         val sslContext = SSLContext.getInstance("TLS")
@@ -87,7 +88,10 @@ class LanClient(
                     if (it.type == "peer_status" && it.status == "ready") {
                         _state.value = LanConnectionState.READY
                     }
-                    _incoming.tryEmit(it)
+                    val result = incomingChannel.trySend(it)
+                    if (result.isFailure) {
+                        logger.warn("Dropped incoming envelope ${it.type} (channel closed)")
+                    }
                 }.onFailure {
                     logger.error("Failed to decode envelope", it)
                 }

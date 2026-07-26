@@ -98,6 +98,7 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
             return;
         }
 
+        var acceptPairing = _settingsStore.Current.AcceptNewPairing;
         var response = new DiscoveryMessage(
             Type: DiscoveryMessage.ResponseType,
             DeviceId: _settingsStore.Current.DeviceId,
@@ -105,9 +106,11 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
             ServiceName: _settingsStore.Current.ServiceName,
             Host: _hostProvider(),
             Port: _settingsStore.Current.Port,
-            CertificateSha256: _certificateSha256);
+            CertificateSha256: _certificateSha256,
+            PairingAllowed: acceptPairing,
+            PairingCode: acceptPairing ? _settingsStore.Current.PairingCode : null);
         var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(response, ProtocolJson.Options));
         await _udpClient!.SendAsync(payload, result.RemoteEndPoint, cancellationToken);
-        _logStore.Info($"Answered LAN discovery probe from {result.RemoteEndPoint}");
+        _logStore.Info($"Answered LAN discovery probe from {result.RemoteEndPoint} (pairingAllowed={acceptPairing})");
     }
 }

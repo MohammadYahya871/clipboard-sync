@@ -84,7 +84,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        clipboardObserver.stop()
+        // Keep listening when FGS notification path is active; FGS also owns a listener.
+        if (!viewModel.state.value.notificationEnabled || !viewModel.state.value.syncEnabled) {
+            clipboardObserver.stop()
+        }
         viewModel.onUiForegroundChanged(false)
         super.onPause()
     }
@@ -121,7 +124,7 @@ class MainActivity : ComponentActivity() {
     private fun scanPairingQr() {
         val options = ScanOptions()
             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("Scan the Clipboard Sync QR code on Windows")
+            .setPrompt("Scan the Clipboard Sync QR code on your PC")
             .setBeepEnabled(false)
             .setOrientationLocked(false)
         pairingQrLauncher.launch(options)

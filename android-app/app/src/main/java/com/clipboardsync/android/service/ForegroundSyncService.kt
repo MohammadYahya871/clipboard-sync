@@ -6,9 +6,11 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.clipboardsync.android.ClipboardSyncApplication
+import com.clipboardsync.android.clipboard.ClipboardObserver
 
 class ForegroundSyncService : Service() {
     private lateinit var repository: SyncRepository
+    private var clipboardObserver: ClipboardObserver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -18,19 +20,24 @@ class ForegroundSyncService : Service() {
             SyncNotificationHelper.NOTIFICATION_ID,
             SyncNotificationHelper.buildNotification(this)
         )
+        clipboardObserver = ClipboardObserver(this) {
+            repository.onClipboardChanged()
+        }.also { it.start() }
         repository.setServiceActive(true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         repository.setServiceActive(true)
         when (intent?.action) {
-            ACTION_SYNC_SMART -> repository.syncSmartNow("quick-settings")
+            ACTION_SYNC_SMART -> repository.syncCurrentClipboardNow("notification-or-service")
             ACTION_PAUSE_PRIVACY -> repository.setPrivacyPaused(true)
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        clipboardObserver?.stop()
+        clipboardObserver = null
         repository.setServiceActive(false)
         super.onDestroy()
     }

@@ -4,8 +4,10 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.database.ContentObserver
 import android.util.Base64
+import com.clipboardsync.android.NotificationSyncActivity
 import com.clipboardsync.android.clipboard.ClipboardApplyUseCase
 import com.clipboardsync.android.clipboard.ClipboardNormalizer
 import com.clipboardsync.android.clipboard.ImageCacheStore
@@ -17,8 +19,10 @@ import com.clipboardsync.android.diagnostics.LogEntry
 import com.clipboardsync.android.pairing.LocalDeviceIdentityStore
 import com.clipboardsync.android.pairing.PairingCodeCodec
 import com.clipboardsync.android.pairing.TrustedDeviceRepository
+import com.clipboardsync.android.pairing.TrustedPeer
 import com.clipboardsync.android.protocol.ClipboardEvent
 import com.clipboardsync.android.protocol.ContentType
+import com.clipboardsync.android.protocol.NearbyHostUiModel
 import com.clipboardsync.android.protocol.NormalizedClipboard
 import com.clipboardsync.android.protocol.ProtocolEnvelope
 import com.clipboardsync.android.protocol.TransferState
@@ -37,13 +41,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.min
 
 data class RecentItemUiModel(
     val eventId: String,
@@ -84,8 +91,10 @@ data class SyncUiState(
     val recentItems: List<RecentItemUiModel> = emptyList(),
     val logs: List<LogEntry> = emptyList(),
     val savedDevices: List<SavedDeviceUiModel> = emptyList(),
+    val nearbyHosts: List<NearbyHostUiModel> = emptyList(),
+    val nearbyScanInProgress: Boolean = false,
     val manualPairingPayload: String = "",
-    val autoScreenshotSyncEnabled: Boolean = true,
+    val autoScreenshotSyncEnabled: Boolean = false,
     val privacyPaused: Boolean = false,
     val syncMode: SyncMode = SyncMode.MIRROR,
     val allowTextSync: Boolean = true,
@@ -94,7 +103,7 @@ data class SyncUiState(
     val maxImageSizeMb: Int = 25,
     val queuedOutboundCount: Int = 0,
     val deferredIncomingCount: Int = 0,
-    val guidance: String = "Mirror mode syncs foreground clipboard changes. Manual mode waits for buttons, shares, or tiles. Ask mode stages items in history before you resend them. Receive/send-only modes are useful for privacy."
+    val guidance: String = "TEXT/URL/image clipboard auto-sync when mirroring. Sync now sends the current clipboard (not gallery screenshots). Keep notification on; if HyperOS blocks background clipboard, tap Sync."
 )
 
 private data class PendingEvent(
@@ -149,16 +158,23 @@ class SyncRepository(
     private val recentPayloads = ConcurrentHashMap<String, NormalizedClipboard>()
     private val deferredIncoming = ConcurrentHashMap<String, NormalizedClipboard>()
     private var uiForeground = false
+    /** True while NotificationSyncActivity (or similar) holds clipboard focus. */
+    private var clipboardAccessSession = false
     private var serviceActive = false
     private var lastLocalClipboardAt = Instant.EPOCH
+    private var lastRemoteAppliedAt = Instant.EPOCH
+    private var lastImageQueuedAt = Instant.EPOCH
     private var lastQueuedLocalHash: String? = null
     private var reconnectJob: Job? = null
     private var discoveryConnectJob: Job? = null
+    private var nearbyScanJob: Job? = null
     private var flushJob: Job? = null
     private var clipboardChangeJob: Job? = null
+    private var clipboardPollJob: Job? = null
     private var availablePeerIds: Set<String> = emptySet()
     private var screenshotObserver: ContentObserver? = null
     private var lastSyncedScreenshotId: Long = prefs.getLong(KEY_LAST_SCREENSHOT_ID, -1L)
+    private var lastClipboardActivityLaunchAt = 0L
 
     init {
         imageCacheStore.cleanup()
@@ -175,11 +191,15 @@ class SyncRepository(
             }
         }
         scope.launch {
-            lanClient.incoming.collectLatest { envelope ->
+            // Must use collect (not collectLatest): image sync is many envelopes
+            // (offer + begin + N chunks + complete). collectLatest cancels in-flight
+            // handlers and drops chunks, so images never apply / never ack.
+            lanClient.incoming.collect { envelope ->
                 handleIncomingEnvelope(envelope)
             }
         }
         nsdPeerDiscovery.start()
+        startClipboardPolling()
     }
 
     fun onUiForegroundChanged(active: Boolean) {
@@ -187,6 +207,7 @@ class SyncRepository(
         logger.info("UI foreground changed: $active")
         if (active && isSyncEnabled()) {
             ensureConnected()
+            startClipboardPolling()
             if (isNotificationEnabled() && NotificationPermissionHelper.canShowNotifications(appContext)) {
                 ForegroundSyncService.sync(appContext)
             }
@@ -201,6 +222,7 @@ class SyncRepository(
         logger.info("Service active changed: $active")
         if (active && isSyncEnabled()) {
             ensureConnected()
+            startClipboardPolling()
         } else if (!active && !uiForeground) {
             lanClient.disconnect()
         }
@@ -283,8 +305,41 @@ class SyncRepository(
 
     fun scanSavedDevices() {
         scope.launch {
-            scanSavedPeers(connectSelected = false)
+            scanSavedPeers(connectFirstReachable = true)
         }
+    }
+
+    fun findNearbyHosts() {
+        if (nearbyScanJob?.isActive == true) return
+        nearbyScanJob = scope.launch {
+            _uiState.value = _uiState.value.copy(nearbyScanInProgress = true, nearbyHosts = emptyList())
+            val hosts = runCatching {
+                lanPeerDiscovery.discoverPairableHosts()
+            }.onFailure {
+                logger.error("Nearby host scan failed", it)
+            }.getOrDefault(emptyList())
+            val savedIds = trustedDeviceRepository.getTrustedPeers().map { it.deviceId }.toSet()
+            val models = hosts
+                .filterNot { it.deviceId in savedIds }
+                .map {
+                    NearbyHostUiModel(
+                        deviceId = it.deviceId,
+                        displayName = it.displayName,
+                        endpoint = "${it.host}:${it.port}",
+                        encodedPayload = PairingCodeCodec.encode(it)
+                    )
+                }
+            _uiState.value = _uiState.value.copy(
+                nearbyHosts = models,
+                nearbyScanInProgress = false
+            )
+            logger.info("Nearby scan found ${models.size} pairable host(s)")
+        }
+    }
+
+    fun pairNearbyHost(encodedPayload: String) {
+        pair(encodedPayload)
+        _uiState.value = _uiState.value.copy(nearbyHosts = emptyList())
     }
 
     fun selectSavedDevice(deviceId: String) {
@@ -295,18 +350,54 @@ class SyncRepository(
     }
 
     fun syncCurrentClipboardNow(trigger: String = "manual-button") {
+        scope.launch {
+            syncCurrentClipboardNowAwait(trigger)
+        }
+    }
+
+    suspend fun syncCurrentClipboardNowAwait(trigger: String = "manual-button"): Boolean {
         if (!canSendOutbound("Manual clipboard sync")) {
-            return
+            return false
+        }
+        logger.info("Manual clipboard sync requested from $trigger")
+        // Prefer a stable socket; only force-reconnect when not already ready.
+        if (lanClient.state.value != LanConnectionState.READY) {
+            ensureConnected(force = true)
+        } else {
+            ensureConnected(force = false)
         }
 
-        scope.launch {
-            logger.info("Manual clipboard sync requested from $trigger")
-            ensureConnected(force = true)
-            syncCurrentClipboardWithRetryWindow(
-                trigger = trigger,
+        repeat(3) { attempt ->
+            val synced = syncCurrentClipboardWithRetryWindow(
+                trigger = if (attempt == 0) trigger else "$trigger-retry-$attempt",
                 forceResend = true,
-                logUnavailableReason = true
+                logUnavailableReason = attempt == 2
             )
+            if (synced) {
+                return true
+            }
+            delay(350)
+        }
+
+        // Last-ditch diagnostics so HyperOS clipboard blocks are visible in logcat.
+        runCatching { clipboardNormalizer.normalizeCurrentClipboard(logSnapshot = true) }
+        logger.warn("Manual clipboard sync failed after retries from $trigger")
+        return false
+    }
+
+    suspend fun syncSmartNowAwait(trigger: String = "smart-sync"): Boolean {
+        // v2: Sync never prefers screenshots. Clipboard only.
+        return syncCurrentClipboardNowAwait(trigger)
+    }
+
+    suspend fun <T> withClipboardAccessSession(block: suspend () -> T): T {
+        clipboardAccessSession = true
+        logger.info("Clipboard access session started")
+        return try {
+            block()
+        } finally {
+            clipboardAccessSession = false
+            logger.info("Clipboard access session ended")
         }
     }
 
@@ -335,20 +426,8 @@ class SyncRepository(
     }
 
     fun syncSmartNow(trigger: String = "smart-sync") {
-        if (!canSendOutbound("Smart sync")) {
-            return
-        }
-
         scope.launch {
-            ensureConnected(force = true)
-            val screenshotSynced = syncLatestScreenshotToClipboardIfAvailable("$trigger-screenshot")
-            if (!screenshotSynced) {
-                syncCurrentClipboardWithRetryWindow(
-                    trigger = "$trigger-clipboard",
-                    forceResend = true,
-                    logUnavailableReason = true
-                )
-            }
+            syncSmartNowAwait(trigger)
         }
     }
 
@@ -454,21 +533,104 @@ class SyncRepository(
     }
 
     fun onClipboardChanged() {
-        if (!uiForeground || !canMirrorClipboardChange()) {
+        val hasFocus = uiForeground || clipboardAccessSession
+        logger.info(
+            "Clipboard change detected (uiForeground=$uiForeground serviceActive=$serviceActive " +
+                "accessSession=$clipboardAccessSession mode=${syncMode()})"
+        )
+        if ((!hasFocus && !serviceActive) || !canMirrorClipboardChange()) {
+            logger.info("Clipboard change ignored (not mirroring or inactive)")
             return
+        }
+        // Claim local ownership immediately so a racing remote offer cannot overwrite
+        // the user's fresh copy before we finish reading/sending it.
+        if (!lastRemoteAppliedAt.isAfter(Instant.now().minusMillis(400L))) {
+            lastLocalClipboardAt = Instant.now()
         }
         clipboardChangeJob?.cancel()
         clipboardChangeJob = scope.launch {
+            // Background: try a direct read first (rarely works), then wake a brief
+            // transparent activity so HyperOS grants clipboard focus.
+            if (!hasFocus && serviceActive) {
+                delay(80)
+                val backgroundRead = readCurrentClipboard(
+                    trigger = "clipboard-change-bg",
+                    logUnavailableReason = false,
+                    logSnapshot = false
+                )
+                if (backgroundRead != null &&
+                    !loopGuard.shouldSuppressLocal(backgroundRead.event.contentHashSha256) &&
+                    backgroundRead.event.contentHashSha256 != lastQueuedLocalHash
+                ) {
+                    logger.info("Background clipboard read succeeded without activity")
+                    syncNormalizedIfNeeded(backgroundRead, "clipboard-change-bg", forceResend = false)
+                    return@launch
+                }
+                launchClipboardOnlySyncActivity()
+                return@launch
+            }
+
             delay(CLIPBOARD_CHANGE_DEBOUNCE_MS)
-            syncCurrentClipboardWithRetryWindow("clipboard-change")
+            val normalized = readCurrentClipboard(
+                trigger = "clipboard-change",
+                logUnavailableReason = true,
+                logSnapshot = false
+            )
+            if (normalized == null) {
+                logger.warn("Foreground clipboard change did not produce a sendable item")
+                return@launch
+            }
+            // Only ignore the echo of a clip we ourselves just applied from remote.
+            if (loopGuard.shouldSuppressLocal(normalized.event.contentHashSha256) ||
+                normalized.event.contentHashSha256 == lastQueuedLocalHash
+            ) {
+                logger.info("Clipboard change ignored (echo of recent remote/local item)")
+                return@launch
+            }
+            syncNormalizedIfNeeded(normalized, "clipboard-change", forceResend = false)
         }
+    }
+
+    fun startClipboardPolling() {
+        if (clipboardPollJob?.isActive == true) return
+        clipboardPollJob = scope.launch {
+            var lastHash: String? = lastQueuedLocalHash
+            while (isActive && isSyncEnabled() && canMirrorClipboardChange()) {
+                delay(CLIPBOARD_POLL_INTERVAL_MS)
+                if (!uiForeground && !serviceActive) continue
+                // Background reads are blocked by Android; only poll while UI is open.
+                if (!uiForeground) continue
+                val normalized = readCurrentClipboard(
+                    trigger = "clipboard-poll",
+                    logUnavailableReason = false,
+                    logSnapshot = false
+                ) ?: continue
+                val hash = normalized.event.contentHashSha256
+                if (hash == lastHash ||
+                    hash == lastQueuedLocalHash ||
+                    loopGuard.shouldSuppressLocal(hash)
+                ) {
+                    lastHash = hash
+                    continue
+                }
+                lastHash = hash
+                logger.info("Clipboard poll detected new content (${normalized.event.contentType})")
+                syncNormalizedIfNeeded(normalized, "clipboard-poll", forceResend = false)
+            }
+        }
+    }
+
+    fun stopClipboardPolling() {
+        clipboardPollJob?.cancel()
+        clipboardPollJob = null
     }
 
     private fun isSyncEnabled(): Boolean = prefs.getBoolean(KEY_SYNC_ENABLED, true)
 
     private fun isNotificationEnabled(): Boolean = prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true)
 
-    private fun isAutoScreenshotSyncEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_SCREENSHOT_SYNC_ENABLED, true)
+    private fun isAutoScreenshotSyncEnabled(): Boolean =
+        prefs.getBoolean(KEY_AUTO_SCREENSHOT_SYNC_ENABLED, false)
 
     private fun isPrivacyPaused(): Boolean = prefs.getBoolean(KEY_PRIVACY_PAUSED, false)
 
@@ -514,47 +676,101 @@ class SyncRepository(
     }
 
     private fun ensureConnected(force: Boolean = false) {
-        val peer = trustedDeviceRepository.getTrustedPeer() ?: run {
+        val peers = trustedDeviceRepository.getTrustedPeers()
+        if (peers.isEmpty()) {
             logger.warn("Connect skipped because no trusted peer is configured")
             return
         }
-        if (!force && lanClient.state.value in listOf(LanConnectionState.CONNECTING, LanConnectionState.CONNECTED, LanConnectionState.READY)) {
+        if (!force && lanClient.state.value in listOf(
+                LanConnectionState.CONNECTING,
+                LanConnectionState.CONNECTED,
+                LanConnectionState.READY
+            )
+        ) {
             return
         }
-        val nsdDiscovered = nsdPeerDiscovery.knownHostFor(peer.serviceName)
-        if (nsdDiscovered != null) {
-            val effectivePeer = peer.copy(host = nsdDiscovered.host, port = nsdDiscovered.port)
-            trustedDeviceRepository.updateEndpoint(effectivePeer)
-            lanClient.connect(effectivePeer, localDeviceIdentityStore.deviceId)
+        if (!isSyncEnabled()) {
+            return
+        }
+
+        logger.info("Searching ${peers.size} saved peer(s) for autoconnect (force=$force)")
+        if (discoveryConnectJob?.isActive == true && !force) {
+            return
+        }
+        discoveryConnectJob?.cancel()
+        discoveryConnectJob = scope.launch {
+            connectFirstReachablePeer(peers, force)
+        }
+    }
+
+    private suspend fun connectFirstReachablePeer(peers: List<TrustedPeer>, force: Boolean) {
+        val selectedId = trustedDeviceRepository.getTrustedPeer()?.deviceId
+        val ordered = peers.sortedWith(
+            compareByDescending<TrustedPeer> { it.deviceId == selectedId }
+                .thenBy { it.displayName }
+        )
+
+        // Prefer NSD hits first for speed.
+        for (peer in ordered) {
+            val nsd = nsdPeerDiscovery.knownHostFor(peer.serviceName) ?: continue
+            val effective = peer.copy(host = nsd.host, port = nsd.port)
+            trustedDeviceRepository.updateEndpoint(effective)
+            availablePeerIds = availablePeerIds + effective.deviceId
+            if (tryConnectPeer(effective, force)) {
+                refreshPairedState()
+                return
+            }
+        }
+
+        val discovered = lanPeerDiscovery.discoverTrustedPeers(ordered, timeoutMillis = 1_800)
+        availablePeerIds = discovered.map { it.deviceId }.toSet()
+        discovered.forEach { trustedDeviceRepository.updateEndpoint(it) }
+        refreshPairedState()
+
+        val preferred = discovered.firstOrNull { it.deviceId == selectedId } ?: discovered.firstOrNull()
+        if (preferred != null) {
+            tryConnectPeer(preferred, force = force)
             return
         }
 
         if (force) {
-            lanClient.connect(peer, localDeviceIdentityStore.deviceId)
-        } else {
-            logger.info("Searching for saved peer ${peer.displayName} before autoconnect")
-        }
-        discoverAndConnectSavedPeer(peer, force)
-    }
-
-    private fun discoverAndConnectSavedPeer(peer: com.clipboardsync.android.pairing.TrustedPeer, force: Boolean) {
-        if (discoveryConnectJob?.isActive == true) return
-        discoveryConnectJob = scope.launch {
-            val discovered = lanPeerDiscovery.discoverTrustedPeer(peer) ?: return@launch
-            trustedDeviceRepository.updateEndpoint(discovered)
-            val shouldReconnect = force ||
-                lanClient.state.value == LanConnectionState.FAILED ||
-                lanClient.state.value == LanConnectionState.DISCONNECTED ||
-                discovered.host != peer.host ||
-                discovered.port != peer.port
-            if (shouldReconnect && isSyncEnabled()) {
-                logger.info("Autoconnecting to saved peer ${discovered.displayName} at ${discovered.host}:${discovered.port}")
-                lanClient.connect(discovered, localDeviceIdentityStore.deviceId)
+            for (peer in ordered) {
+                if (tryConnectPeer(peer, force = false) || tryConnectPeer(peer, force = true)) {
+                    return
+                }
             }
         }
+
+        logger.warn("No reachable saved peers found")
+        scheduleReconnect()
     }
 
-    private suspend fun scanSavedPeers(connectSelected: Boolean) {
+    private fun tryConnectPeer(peer: TrustedPeer, force: Boolean): Boolean {
+        if (!isSyncEnabled()) return false
+        val state = lanClient.state.value
+        val selected = trustedDeviceRepository.getTrustedPeer()
+        // Never tear down a healthy READY socket just because discovery fired again.
+        if (state == LanConnectionState.READY &&
+            selected?.deviceId == peer.deviceId &&
+            selected.host == peer.host &&
+            selected.port == peer.port
+        ) {
+            return true
+        }
+        if (!force && state in listOf(LanConnectionState.CONNECTING, LanConnectionState.CONNECTED, LanConnectionState.READY)) {
+            return state == LanConnectionState.READY
+        }
+        if (force && state == LanConnectionState.READY && selected?.deviceId == peer.deviceId) {
+            logger.info("Already connected to ${peer.displayName}; skipping reconnect")
+            return true
+        }
+        trustedDeviceRepository.selectPeer(peer.deviceId)
+        logger.info("Connecting to saved peer ${peer.displayName} at ${peer.host}:${peer.port}")
+        lanClient.connect(peer, localDeviceIdentityStore.deviceId)
+        return true
+    }
+
+    private suspend fun scanSavedPeers(connectFirstReachable: Boolean) {
         val peers = trustedDeviceRepository.getTrustedPeers()
         if (peers.isEmpty()) {
             logger.warn("No saved devices to scan")
@@ -562,17 +778,15 @@ class SyncRepository(
             return
         }
 
-        val discovered = peers.mapNotNull { lanPeerDiscovery.discoverTrustedPeer(it, timeoutMillis = 700) }
+        val discovered = lanPeerDiscovery.discoverTrustedPeers(peers, timeoutMillis = 1_800)
         availablePeerIds = discovered.map { it.deviceId }.toSet()
         discovered.forEach { trustedDeviceRepository.updateEndpoint(it) }
         refreshPairedState()
 
-        if (connectSelected) {
-            trustedDeviceRepository.getTrustedPeer()?.let { selected ->
-                discovered.firstOrNull { it.deviceId == selected.deviceId }?.let {
-                    lanClient.connect(it, localDeviceIdentityStore.deviceId)
-                }
-            }
+        if (connectFirstReachable && discovered.isNotEmpty() && isSyncEnabled()) {
+            val selectedId = trustedDeviceRepository.getTrustedPeer()?.deviceId
+            val target = discovered.firstOrNull { it.deviceId == selectedId } ?: discovered.first()
+            tryConnectPeer(target, force = false)
         }
     }
 
@@ -661,7 +875,7 @@ class SyncRepository(
         } else if ((state == LanConnectionState.FAILED || state == LanConnectionState.DISCONNECTED) &&
             isSyncEnabled() &&
             (uiForeground || serviceActive) &&
-            trustedDeviceRepository.getTrustedPeer() != null
+            trustedDeviceRepository.getTrustedPeers().isNotEmpty()
         ) {
             scheduleReconnect()
         }
@@ -670,8 +884,47 @@ class SyncRepository(
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
         reconnectJob = scope.launch {
-            delay(3_000)
-            ensureConnected(force = true)
+            var delayMs = 5_000L
+            while (isActive &&
+                isSyncEnabled() &&
+                (uiForeground || serviceActive) &&
+                lanClient.state.value != LanConnectionState.READY &&
+                trustedDeviceRepository.getTrustedPeers().isNotEmpty()
+            ) {
+                delay(delayMs)
+                if (lanClient.state.value == LanConnectionState.READY) {
+                    break
+                }
+                logger.info("Periodic multi-peer search while disconnected")
+                ensureConnected(force = false)
+                if (lanClient.state.value != LanConnectionState.READY) {
+                    ensureConnected(force = true)
+                }
+                if (lanClient.state.value == LanConnectionState.READY) {
+                    break
+                }
+                delayMs = min(delayMs + 5_000L, 30_000L)
+            }
+        }
+    }
+
+    private fun launchClipboardOnlySyncActivity() {
+        val now = System.currentTimeMillis()
+        if (now - lastClipboardActivityLaunchAt < CLIPBOARD_ACTIVITY_COOLDOWN_MS) {
+            logger.info("Clipboard sync activity launch skipped (cooldown)")
+            return
+        }
+        lastClipboardActivityLaunchAt = now
+        logger.info("Launching clipboard-only sync activity because background clipboard read was blocked")
+        // Prefer PendingIntent / full-screen wake — direct startActivity is often blocked
+        // by Android BAL / HyperOS "background popup" restrictions.
+        val launched = SyncNotificationHelper.launchClipboardSyncActivity(appContext)
+        if (!launched) {
+            logger.warn(
+                "Could not bring clipboard sync activity to foreground. " +
+                    "On HyperOS/Xiaomi enable: App info → Other permissions → " +
+                    "Display pop-up windows while running in background"
+            )
         }
     }
 
@@ -751,11 +1004,28 @@ class SyncRepository(
 
     private suspend fun handleTransferComplete(envelope: ProtocolEnvelope) {
         val descriptor = envelope.transfer ?: return
-        val incoming = incomingTransfers.remove(descriptor.transferId) ?: return
+        val incoming = incomingTransfers.remove(descriptor.transferId) ?: run {
+            logger.warn("transfer_complete for unknown transfer ${descriptor.transferId}")
+            return
+        }
         val bytes = incoming.output.toByteArray()
+        logger.info(
+            "Completing image transfer ${descriptor.transferId}: " +
+                "${bytes.size}/${descriptor.totalBytes} bytes"
+        )
         val checksum = CryptoUtils.sha256Hex(bytes)
         if (!checksum.equals(descriptor.checksumSha256, ignoreCase = true)) {
-            logger.warn("Checksum mismatch for transfer ${descriptor.transferId}")
+            logger.warn(
+                "Checksum mismatch for transfer ${descriptor.transferId} " +
+                    "(got $checksum expected ${descriptor.checksumSha256}, bytes=${bytes.size})"
+            )
+            lanClient.sendEnvelope(
+                ProtocolEnvelope(
+                    type = "clipboard_reject",
+                    event = incoming.event,
+                    reason = "Checksum mismatch"
+                )
+            )
             return
         }
         applyRemoteEvent(incoming.event, bytes)
@@ -795,36 +1065,44 @@ class SyncRepository(
             return
         }
 
-        if (lastLocalClipboardAt.isAfter(Instant.now().minus(CONFLICT_WINDOW_MILLIS, ChronoUnit.MILLIS))) {
-            logger.warn("Deferred remote event ${event.eventId} because local clipboard changed recently")
-            val deferred = NormalizedClipboard(
-                event = event.copy(transferState = TransferState.DEFERRED),
-                imageBytes = imageBytes,
-                previewText = event.textPayload ?: "Deferred image",
-                fromRemote = true
-            )
-            deferredIncoming[event.eventId] = deferred
-            updateQueueCounts()
-            addRecent(
-                deferred,
-                "Windows -> Android",
-                "Deferred"
-            )
+        // Echo of content we already sent/applied — ack without rewriting clipboard.
+        if (loopGuard.shouldSuppressLocal(event.contentHashSha256) ||
+            event.contentHashSha256 == lastQueuedLocalHash
+        ) {
+            logger.info("Ignoring remote echo for ${event.eventId}")
+            loopGuard.rememberSeenEvent(event.eventId)
             lanClient.sendEnvelope(
                 ProtocolEnvelope(
                     type = "clipboard_ack",
                     event = event,
-                    status = "deferred"
+                    status = "applied"
                 )
             )
             return
         }
 
+        // Never overwrite a clipboard the user just copied on this phone.
+        if (lastLocalClipboardAt.isAfter(Instant.now().minus(CONFLICT_WINDOW_MILLIS, ChronoUnit.MILLIS))) {
+            logger.info("Skipping remote event ${event.eventId}; local clipboard changed recently")
+            loopGuard.rememberSeenEvent(event.eventId)
+            lanClient.sendEnvelope(
+                ProtocolEnvelope(
+                    type = "clipboard_ack",
+                    event = event,
+                    status = "skipped_local_newer"
+                )
+            )
+            return
+        }
+
+        // Mark before writing so the clipboard listener/poller cannot bounce it back.
+        lastQueuedLocalHash = event.contentHashSha256
+        lastRemoteAppliedAt = Instant.now()
+        loopGuard.markRemoteApplied(event.contentHashSha256)
+        loopGuard.rememberSeenEvent(event.eventId)
+
         val applied = clipboardApplyUseCase.applyRemoteClip(event, imageBytes)
         if (applied) {
-            lastQueuedLocalHash = event.contentHashSha256
-            loopGuard.markRemoteApplied(event.contentHashSha256)
-            loopGuard.rememberSeenEvent(event.eventId)
             addRecent(
                 NormalizedClipboard(
                     event = event.copy(transferState = TransferState.ACKED),
@@ -840,6 +1118,15 @@ class SyncRepository(
                     type = "clipboard_ack",
                     event = event,
                     status = "applied"
+                )
+            )
+        } else {
+            logger.warn("Failed to apply remote event ${event.eventId} to clipboard")
+            lanClient.sendEnvelope(
+                ProtocolEnvelope(
+                    type = "clipboard_reject",
+                    event = event,
+                    reason = "Apply failed"
                 )
             )
         }
@@ -874,7 +1161,7 @@ class SyncRepository(
             return
         }
         val hash = normalized.event.contentHashSha256
-        if (loopGuard.shouldSuppressLocal(hash)) {
+        if (!forceResend && loopGuard.shouldSuppressLocal(hash)) {
             logger.info("Suppressed clipboard echo for ${normalized.event.eventId}")
             return
         }
@@ -886,6 +1173,7 @@ class SyncRepository(
         enqueueOutbound(normalized)
         lastQueuedLocalHash = hash
         lastLocalClipboardAt = Instant.now()
+        loopGuard.markRemoteApplied(hash)
         addRecent(normalized, "Android -> Windows", "Queued")
         logger.info("Queued Android clipboard event ${normalized.event.eventId} from $trigger")
         flushQueue()
@@ -895,12 +1183,12 @@ class SyncRepository(
         trigger: String,
         forceResend: Boolean = false,
         logUnavailableReason: Boolean = false
-    ) {
+    ): Boolean {
         val initial = readCurrentClipboard(
             trigger = trigger,
             logUnavailableReason = logUnavailableReason,
             logSnapshot = forceResend || trigger == "foreground-resume"
-        ) ?: return
+        ) ?: return false
 
         var chosen = initial
         if (chosen.event.contentHashSha256 == lastQueuedLocalHash) {
@@ -924,12 +1212,10 @@ class SyncRepository(
             }
         }
 
-        if (forceResend && chosen.event.contentHashSha256 == lastQueuedLocalHash) {
-            logger.warn("Manual sync skipped because the clipboard still matches the previously queued item after retries")
-            return
-        }
-
+        // Manual Sync must always attempt a send, even if the hash matches the last
+        // queued item — Linux may never have received it (HyperOS / reconnect races).
         syncNormalizedIfNeeded(chosen, trigger, forceResend)
+        return true
     }
 
     private suspend fun readCurrentClipboard(
@@ -975,13 +1261,26 @@ class SyncRepository(
         }
 
         val hash = normalized.event.contentHashSha256
-        if (loopGuard.shouldSuppressLocal(hash)) {
+        if (!forceResend && loopGuard.shouldSuppressLocal(hash)) {
             logger.info("Suppressed clipboard echo for ${normalized.event.eventId}")
             return
         }
         if (!forceResend && lastQueuedLocalHash == hash) {
             logger.info("Skipped unchanged Android clipboard on $trigger")
             return
+        }
+        // After an image Sync, HyperOS often exposes PNG-as-text / a sibling text item.
+        // Do not let that clobber the image transfer on Linux. Manual Sync always wins.
+        if (!forceResend &&
+            (normalized.event.contentType == ContentType.TEXT || normalized.event.contentType == ContentType.URL)
+        ) {
+            val msSinceImage = java.time.Duration.between(lastImageQueuedAt, Instant.now()).toMillis()
+            if (msSinceImage in 0..4_000L) {
+                logger.warn(
+                    "Skipping ${normalized.event.contentType} from $trigger; image was queued ${msSinceImage}ms ago"
+                )
+                return
+            }
         }
         if (syncMode() == SyncMode.ASK && !forceResend) {
             addRecent(normalized, "Android -> Windows", "Staged")
@@ -992,8 +1291,13 @@ class SyncRepository(
         enqueueOutbound(normalized)
         lastQueuedLocalHash = hash
         lastLocalClipboardAt = Instant.now()
+        if (normalized.event.contentType == ContentType.IMAGE) {
+            lastImageQueuedAt = Instant.now()
+        }
+        // Prevent peer echo of this outbound item from being re-applied/re-queued.
+        loopGuard.markRemoteApplied(hash)
         addRecent(normalized, "Android -> Windows", "Queued")
-        logger.info("Queued Android clipboard event ${normalized.event.eventId} from $trigger")
+        logger.info("Queued Android clipboard event ${normalized.event.eventId} (${normalized.event.contentType}) from $trigger")
         flushQueue()
     }
 
@@ -1188,11 +1492,13 @@ class SyncRepository(
         private const val KEY_ALLOW_IMAGE_SYNC = "allow_image_sync"
         private const val KEY_MAX_IMAGE_SIZE_MB = "max_image_size_mb"
         private const val KEY_LAST_SCREENSHOT_ID = "last_screenshot_id"
-        private const val CONFLICT_WINDOW_MILLIS = 1_500L
+        private const val CONFLICT_WINDOW_MILLIS = 2_500L
         private const val CLIPBOARD_CHANGE_DEBOUNCE_MS = 250L
         private const val CLIPBOARD_REFRESH_RETRY_COUNT = 4
         private const val CLIPBOARD_REFRESH_RETRY_DELAY_MS = 300L
         private const val SMART_SYNC_SCREENSHOT_MAX_AGE_MILLIS = 5 * 60 * 1000L
+        private const val CLIPBOARD_ACTIVITY_COOLDOWN_MS = 700L
+        private const val CLIPBOARD_POLL_INTERVAL_MS = 1_200L
     }
 
     private fun buildSavedDeviceModels(): List<SavedDeviceUiModel> {

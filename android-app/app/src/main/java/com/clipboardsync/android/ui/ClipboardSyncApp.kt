@@ -48,6 +48,7 @@ import com.clipboardsync.android.protocol.TransferState
 import com.clipboardsync.android.protocol.TransportKind
 import com.clipboardsync.android.service.RecentItemUiModel
 import com.clipboardsync.android.service.SavedDeviceUiModel
+import com.clipboardsync.android.protocol.NearbyHostUiModel
 import com.clipboardsync.android.service.SyncMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,8 +116,12 @@ fun ClipboardSyncApp(
             item {
                 PairingCard(
                     payload = state.manualPairingPayload,
+                    nearbyHosts = state.nearbyHosts,
+                    nearbyScanInProgress = state.nearbyScanInProgress,
                     onPayloadChanged = viewModel::onManualPayloadChanged,
                     onScanPairingQr = onScanPairingQr,
+                    onFindNearby = viewModel::onFindNearbyHosts,
+                    onPairNearby = viewModel::onPairNearbyHost,
                     onPair = { viewModel.onPair(state.manualPairingPayload) }
                 )
             }
@@ -246,13 +251,13 @@ private fun StatusCard(
 
         SettingRow(
             title = "Keep Notification Active",
-            description = "Keeps the background link alive while the app is hidden.",
+            description = "Required for phone→laptop auto-sync while the app is hidden. On HyperOS also enable: App info → Other permissions → Display pop-up windows while running in background.",
             checked = notificationEnabled,
             onCheckedChange = onNotificationEnabledChanged
         )
         SettingRow(
             title = "Auto-sync Screenshots",
-            description = "Sends new screenshots from MediaStore.",
+            description = "Off by default (v2). Leave off unless you want gallery screenshots auto-pushed. Sync now never sends screenshots.",
             checked = autoScreenshotSyncEnabled,
             onCheckedChange = onAutoScreenshotSyncChanged
         )
@@ -282,14 +287,18 @@ private fun StatusCard(
 @Composable
 private fun PairingCard(
     payload: String,
+    nearbyHosts: List<NearbyHostUiModel>,
+    nearbyScanInProgress: Boolean,
     onPayloadChanged: (String) -> Unit,
     onScanPairingQr: () -> Unit,
+    onFindNearby: () -> Unit,
+    onPairNearby: (String) -> Unit,
     onPair: () -> Unit
 ) {
     FlatCard {
-        SectionTitle("Pair with Windows")
+        SectionTitle("Pair with PC")
         Text(
-            "Scan the QR code shown on the Windows app. If your camera struggles, raise the PC screen brightness or paste the payload.",
+            "Scan the QR on your Linux or Windows app, or find a nearby PC that is accepting new pairing. Paste is only a fallback.",
             style = MaterialTheme.typography.bodyMedium
         )
         Row(
@@ -300,17 +309,35 @@ private fun PairingCard(
                 Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                 Text("Scan QR", modifier = Modifier.padding(start = 8.dp))
             }
-            Button(onClick = onPair, modifier = Modifier.weight(1f)) {
-                Text("Pair")
+            Button(onClick = onFindNearby, modifier = Modifier.weight(1f), enabled = !nearbyScanInProgress) {
+                Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
+                Text(if (nearbyScanInProgress) "Scanning…" else "Find nearby", modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+        if (nearbyHosts.isNotEmpty()) {
+            Text("Tap a PC to pair:", style = MaterialTheme.typography.labelLarge)
+            nearbyHosts.forEach { host ->
+                Button(
+                    onClick = { onPairNearby(host.encodedPayload) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
+                        Text(host.displayName)
+                        Text(host.endpoint, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
         OutlinedTextField(
             value = payload,
             onValueChange = onPayloadChanged,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Manual pairing payload") },
+            label = { Text("Manual pairing payload (fallback)") },
             minLines = 2
         )
+        Button(onClick = onPair, modifier = Modifier.fillMaxWidth(), enabled = payload.isNotBlank()) {
+            Text("Pair with pasted payload")
+        }
     }
 }
 
@@ -333,7 +360,7 @@ private fun SavedDevicesCard(
             }
         }
         if (devices.isEmpty()) {
-            Text("No saved Windows devices yet. Pair once, then reconnect from this list.")
+            Text("No saved PCs yet. Pair once; the app keeps searching all saved devices automatically.")
         } else {
             devices.forEach { device ->
                 Card(

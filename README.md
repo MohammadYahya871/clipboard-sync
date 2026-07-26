@@ -2,11 +2,12 @@
 
 ![Clipboard Sync icon](shared/branding/app-icon-preview.png)
 
-Local-first clipboard sync between a native Windows desktop app and an Android phone.
+Local-first clipboard sync between a desktop host (Windows or Linux) and an Android phone.
 
 This repository contains:
 
 - a native Windows tray app built with `.NET 8 + WPF + Win32 clipboard integration`
+- a native Linux desktop app built with `.NET 8 + Avalonia + wl-clipboard` (Wayland text + PNG/screenshots)
 - an Android app built with `Kotlin + Jetpack Compose`
 - a shared LAN-first sync protocol with secure pairing, loop prevention, image support, retry/ack handling, and persistent diagnostics
 
@@ -73,7 +74,16 @@ This repository handles that honestly:
 - the Android share sheet entry `Sync to PC clipboard` copies shared text/images into Android clipboard and sends that exact item to Windows
 - the notification action uses a foreground activity workaround because hidden background clipboard reads can still be blocked by Android / OEM firmware
 
-## Quick Start
+## Quick Start (Linux)
+
+1. Install `wl-clipboard` and open ports `43871/tcp` + `43872/udp` (see `linux-app/README.md`).
+2. Run `linux-app/scripts/run.sh` (or the published binary under `linux-app/dist/`).
+3. Click `Copy pairing payload`.
+4. In Android, paste that payload into `Manual pairing` and tap `Pair device`.
+5. Test Linux -> Android by copying text or a screenshot/image on Linux.
+6. Test Android -> Linux with `Sync now`, in-app `Sync clipboard`, or `Share` -> `Sync to PC clipboard`.
+
+## Quick Start (Windows)
 
 1. Start the Windows app.
 2. In Windows, click `Copy Pairing Payload`.
@@ -106,6 +116,8 @@ Both platforms can filter outbound text, URLs, and images. Image sync also has a
   Android Studio project
 - `windows-app/`
   WPF desktop project
+- `linux-app/`
+  Avalonia / Wayland desktop project (`src/ClipboardSync.Linux`, `dist/`, `scripts/run.sh`)
 - `shared/`
   protocol schema, fixtures, and branding sources
 - `docs/`

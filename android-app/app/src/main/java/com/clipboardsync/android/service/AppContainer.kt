@@ -25,7 +25,7 @@ class AppContainer(
     private val clipboardApplyUseCase = ClipboardApplyUseCase(app, imageCacheStore, logger)
     private val clipboardNormalizer = ClipboardNormalizer(app, localDeviceIdentityStore, imageCacheStore, logger)
     private val lanClient = LanClient(logger)
-    private val lanPeerDiscovery = LanPeerDiscovery(logger)
+    private val lanPeerDiscovery = LanPeerDiscovery(app, logger)
     private val nsdPeerDiscovery = NsdPeerDiscovery(app, logger)
     private val transportSelector = TransportSelector()
     private val loopGuard = LoopGuard()

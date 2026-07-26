@@ -109,6 +109,23 @@ public sealed class SyncCoordinator : IAsyncDisposable
         }
     }
 
+    public bool AcceptNewPairing
+    {
+        get => _settingsStore.Current.AcceptNewPairing;
+        set
+        {
+            if (_settingsStore.Current.AcceptNewPairing == value)
+            {
+                return;
+            }
+
+            _settingsStore.Current.AcceptNewPairing = value;
+            _settingsStore.Save();
+            _logStore.Info($"Windows accept new pairing set to {value}");
+            OnStateChanged();
+        }
+    }
+
     public SyncMode SyncMode
     {
         get => _settingsStore.Current.SyncMode;

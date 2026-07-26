@@ -99,7 +99,9 @@ public sealed record DiscoveryMessage(
     string? ServiceName = null,
     string? Host = null,
     int? Port = null,
-    string? CertificateSha256 = null)
+    string? CertificateSha256 = null,
+    bool? PairingAllowed = null,
+    string? PairingCode = null)
 {
     public const string DiscoverType = "clipboard_sync_discover";
     public const string ResponseType = "clipboard_sync_device";

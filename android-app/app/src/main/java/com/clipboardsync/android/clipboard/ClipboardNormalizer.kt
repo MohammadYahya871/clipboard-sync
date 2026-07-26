@@ -45,63 +45,69 @@ class ClipboardNormalizer(
                 }
             }
         }
-        var attemptedImageDecode = false
-        var firstTextCandidate: NormalizedClipboard? = null
 
-        for (itemIndex in 0 until clip.itemCount) {
-            val item = clip.getItemAt(itemIndex)
-            val rawText = item.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-            val candidateUris = extractCandidateUris(item, rawText)
-            var itemAttemptedImageDecode = false
+        val hasImageMime = clipMimeTypes.any { it.startsWith("image/") }
 
-            for (uri in candidateUris) {
-                if (shouldTryImageFirst(uri, clipMimeTypes)) {
-                    attemptedImageDecode = true
-                    itemAttemptedImageDecode = true
+        suspend fun tryNormalizeImages(): NormalizedClipboard? {
+            for (itemIndex in 0 until clip.itemCount) {
+                val item = clip.getItemAt(itemIndex)
+                val rawText = item.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                val candidateUris = extractCandidateUris(item, rawText)
+                for (uri in candidateUris) {
+                    if (!shouldTryImage(uri, clipMimeTypes)) continue
                     logger.info(
                         "Attempting to normalize clipboard image URI from item $itemIndex: $uri (${clipMimeTypes.joinToString()})"
                     )
-                    normalizeImageUri(uri, sourceDeviceId)?.let { return@withContext it }
+                    normalizeImageUri(uri, sourceDeviceId)?.let { return it }
                 }
             }
-            if (itemAttemptedImageDecode) {
-                logger.warn("Clipboard image candidates from item $itemIndex could not be decoded")
-            }
+            return null
+        }
 
-            rawText?.let { text ->
-                if (itemAttemptedImageDecode && looksLikeLocalContentUri(text)) {
-                    logger.warn("Clipboard item $itemIndex contains a local URI string that could not be decoded as an image")
-                } else if (firstTextCandidate == null) {
-                    val normalizedText = text.replace("\r\n", "\n")
-                    val hash = CryptoUtils.sha256Hex(normalizedText)
-                    val type = if (Patterns.WEB_URL.matcher(normalizedText.trim()).matches()) ContentType.URL else ContentType.TEXT
-                    firstTextCandidate = NormalizedClipboard(
-                        event = ClipboardEvent(
-                            eventId = CryptoUtils.uuidV7(),
-                            sourceDeviceId = sourceDeviceId,
-                            contentType = type,
-                            mimeType = "text/plain",
-                            payloadSizeBytes = normalizedText.toByteArray(Charsets.UTF_8).size.toLong(),
-                            contentHashSha256 = hash,
-                            dedupeKey = "$sourceDeviceId:$hash",
-                            transferState = TransferState.QUEUED,
-                            textPayload = normalizedText
-                        ),
-                        previewText = normalizedText.take(120)
-                    )
+        fun tryNormalizeText(): NormalizedClipboard? {
+            for (itemIndex in 0 until clip.itemCount) {
+                val item = clip.getItemAt(itemIndex)
+                val rawText = item.text?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+                if (looksLikePngBinaryText(rawText) || looksLikeBinaryGarbageText(rawText) || looksLikeLocalContentUri(rawText)) {
+                    logger.info("Skipping clipboard text item $itemIndex (binary/URI/PNG-as-text)")
+                    continue
                 }
+                val normalizedText = rawText.replace("\r\n", "\n")
+                val hash = CryptoUtils.sha256Hex(normalizedText)
+                val type = if (Patterns.WEB_URL.matcher(normalizedText.trim()).matches()) {
+                    ContentType.URL
+                } else {
+                    ContentType.TEXT
+                }
+                logger.info("Normalized clipboard item $itemIndex as $type (${normalizedText.take(80)})")
+                return NormalizedClipboard(
+                    event = ClipboardEvent(
+                        eventId = CryptoUtils.uuidV7(),
+                        sourceDeviceId = sourceDeviceId,
+                        contentType = type,
+                        mimeType = "text/plain",
+                        payloadSizeBytes = normalizedText.toByteArray(Charsets.UTF_8).size.toLong(),
+                        contentHashSha256 = hash,
+                        dedupeKey = "$sourceDeviceId:$hash",
+                        transferState = TransferState.QUEUED,
+                        textPayload = normalizedText
+                    ),
+                    previewText = normalizedText.take(120)
+                )
             }
-
-            candidateUris.firstOrNull()?.let { uri ->
-                normalizeImageUri(uri, sourceDeviceId)?.let { return@withContext it }
-            }
+            return null
         }
 
-        if (attemptedImageDecode) {
-            logger.warn("Clipboard image URI could not be decoded and will fall back to text representations")
+        // When HyperOS advertises image/*, prefer the image. Text-first ordering used to win
+        // with PNG-as-text / sibling captions and overwrite a good image on the peer.
+        if (hasImageMime) {
+            tryNormalizeImages()?.let { return@withContext it }
+            tryNormalizeText()?.let { return@withContext it }
+        } else {
+            // Prefer real user text so image URIs from Sync do not permanently block text copies.
+            tryNormalizeText()?.let { return@withContext it }
+            tryNormalizeImages()?.let { return@withContext it }
         }
-
-        firstTextCandidate?.let { return@withContext it }
 
         logger.warn("Clipboard entry is unsupported or empty")
         null
@@ -138,7 +144,7 @@ class ClipboardNormalizer(
         )
     }
 
-    private fun shouldTryImageFirst(uri: Uri, clipMimeTypes: List<String>): Boolean {
+    private fun shouldTryImage(uri: Uri, clipMimeTypes: List<String>): Boolean {
         if (clipMimeTypes.any { it.startsWith("image/") }) {
             return true
         }
@@ -186,6 +192,49 @@ class ClipboardNormalizer(
 
     private fun looksLikeLocalContentUri(text: String): Boolean {
         return parseLocalUri(text) != null
+    }
+
+    /** Detect PNG bytes that were mis-exposed as CharSequence text. */
+    private fun looksLikePngBinaryText(text: String): Boolean {
+        if (text.contains('\u0000')) {
+            return true
+        }
+        if (text.contains("IHDR") && (text.contains("PNG", ignoreCase = true) || text.contains('\uFFFD'))) {
+            return true
+        }
+        if (text.contains("PNG") &&
+            (text.contains('\uFFFD') || text.contains("IDAT") || text.contains("sBIT") || text.contains("sRGB"))
+        ) {
+            return true
+        }
+        val bytes = text.take(16).toByteArray(Charsets.ISO_8859_1)
+        return bytes.size >= 8 &&
+            bytes[0] == 0x89.toByte() &&
+            bytes[1] == 'P'.code.toByte() &&
+            bytes[2] == 'N'.code.toByte() &&
+            bytes[3] == 'G'.code.toByte()
+    }
+
+    /** Reject high-control / binary garbage that HyperOS sometimes exposes beside images. */
+    private fun looksLikeBinaryGarbageText(text: String): Boolean {
+        if (text.contains('\u0000')) {
+            return true
+        }
+        val sample = text.take(512)
+        if (sample.isEmpty()) {
+            return false
+        }
+        var control = 0
+        for (ch in sample) {
+            val code = ch.code
+            if (code == 0) {
+                return true
+            }
+            if (code < 9 || (code in 14..31) || code == 0x7F || ch == '\uFFFD') {
+                control++
+            }
+        }
+        return control > sample.length / 10
     }
 
     private fun looksLikeLocalUri(uri: Uri): Boolean {

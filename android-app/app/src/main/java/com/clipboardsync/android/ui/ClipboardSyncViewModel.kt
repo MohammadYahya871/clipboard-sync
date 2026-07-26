@@ -45,13 +45,17 @@ class ClipboardSyncViewModel(
 
     fun onManualPayloadChanged(payload: String) = repository.updateManualPairingPayload(payload)
 
+    fun onFindNearbyHosts() = repository.findNearbyHosts()
+
+    fun onPairNearbyHost(encodedPayload: String) = repository.pairNearbyHost(encodedPayload)
+
     fun onReconnect() = repository.reconnect()
 
     fun onScanSavedDevices() = repository.scanSavedDevices()
 
     fun onSelectSavedDevice(deviceId: String) = repository.selectSavedDevice(deviceId)
 
-    fun onSyncSmart() = repository.syncSmartNow()
+    fun onSyncSmart() = repository.syncCurrentClipboardNow()
 
     fun onResendRecent(eventId: String) = repository.resendRecent(eventId)
 

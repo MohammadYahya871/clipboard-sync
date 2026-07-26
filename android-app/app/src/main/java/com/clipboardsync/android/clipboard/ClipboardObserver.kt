@@ -2,14 +2,18 @@ package com.clipboardsync.android.clipboard
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 
 class ClipboardObserver(
     context: Context,
     private val onClipboardChanged: () -> Unit
 ) {
-    private val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    private val appContext = context.applicationContext
+    private val clipboardManager = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val listener = ClipboardManager.OnPrimaryClipChangedListener {
-        onClipboardChanged()
+        mainHandler.post { onClipboardChanged() }
     }
     private var started = false
 
@@ -25,4 +29,3 @@ class ClipboardObserver(
         started = false
     }
 }
-

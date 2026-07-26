@@ -103,13 +103,22 @@ data class DiscoveryMessage(
     val serviceName: String? = null,
     val host: String? = null,
     val port: Int? = null,
-    val certificateSha256: String? = null
+    val certificateSha256: String? = null,
+    val pairingAllowed: Boolean? = null,
+    val pairingCode: String? = null
 ) {
     companion object {
         const val DISCOVER_TYPE = "clipboard_sync_discover"
         const val RESPONSE_TYPE = "clipboard_sync_device"
     }
 }
+
+data class NearbyHostUiModel(
+    val deviceId: String,
+    val displayName: String,
+    val endpoint: String,
+    val encodedPayload: String
+)
 
 data class NormalizedClipboard(
     val event: ClipboardEvent,

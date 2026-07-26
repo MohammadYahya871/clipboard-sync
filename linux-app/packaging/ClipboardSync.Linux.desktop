@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Clipboard Sync
+Comment=Sync clipboard with your Android phone
+Exec=env DOTNET_ROOT=/home/mohammadyahya/.dotnet /home/mohammadyahya/projects/tools/clipboard-sync/linux-app/dist/ClipboardSync.Linux
+Icon=/home/mohammadyahya/projects/tools/clipboard-sync/linux-app/src/ClipboardSync.Linux/Assets/AppIcon.png
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=false
+StartupWMClass=ClipboardSync.Linux

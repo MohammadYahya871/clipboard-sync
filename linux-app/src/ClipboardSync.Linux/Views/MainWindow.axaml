@@ -1,0 +1,129 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ClipboardSync.Linux.ViewModels"
+        x:Class="ClipboardSync.Linux.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/AppIcon.png"
+        Title="Clipboard Sync"
+        Width="920"
+        Height="720"
+        MinWidth="760"
+        MinHeight="560"
+        WindowState="Normal">
+
+  <DockPanel Margin="16">
+    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
+      <TextBlock Text="Clipboard Sync" FontSize="24" FontWeight="Bold" />
+      <TextBlock Text="{Binding StatusSummary}" FontSize="14" Opacity="0.85" />
+      <TextBlock Text="{Binding GuidanceText}" TextWrapping="Wrap" Opacity="0.75" />
+    </StackPanel>
+
+    <Grid ColumnDefinitions="2*,3*" RowDefinitions="Auto,*" >
+      <Border Grid.Column="0" Grid.Row="0" Padding="12" Margin="0,0,8,8" CornerRadius="8" Background="#1414140D">
+        <StackPanel Spacing="8">
+          <TextBlock Text="Connection" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding ConnectionLabel}" />
+          <TextBlock Text="{Binding PairedDeviceLabel}" Opacity="0.8" />
+          <TextBlock Text="{Binding LastItemSummary}" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding QueueSummary}" Opacity="0.75" />
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <ToggleSwitch IsChecked="{Binding SyncEnabled}" OnContent="Sync on" OffContent="Sync off" />
+            <ToggleSwitch IsChecked="{Binding RunAtStartup}" OnContent="Startup" OffContent="No startup" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{Binding SyncMode}" Command="{Binding NextSyncModeCommand}" />
+            <Button Content="Send clipboard now" Command="{Binding SendCurrentClipboardCommand}" />
+            <Button Content="Reconnect" Command="{Binding ReconnectCommand}" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <ToggleSwitch IsChecked="{Binding AllowTextSync}" OnContent="Text" OffContent="No text" />
+            <ToggleSwitch IsChecked="{Binding AllowUrlSync}" OnContent="URL" OffContent="No URL" />
+            <ToggleSwitch IsChecked="{Binding AllowImageSync}" OnContent="Images" OffContent="No images" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock VerticalAlignment="Center" Text="Max image MB:" />
+            <Button Content="-" Command="{Binding DecreaseImageLimitCommand}" Width="36" />
+            <TextBlock VerticalAlignment="Center" Text="{Binding MaxImageSizeMb}" Width="36" TextAlignment="Center" />
+            <Button Content="+" Command="{Binding IncreaseImageLimitCommand}" Width="36" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Grid.Row="0" Padding="12" Margin="8,0,0,8" CornerRadius="8" Background="#1414140D">
+        <StackPanel Spacing="8">
+          <TextBlock Text="Pairing" FontWeight="SemiBold" />
+          <TextBlock Text="On Android: Scan QR, or tap Find nearby. Payload paste is only a fallback." TextWrapping="Wrap" Opacity="0.8" />
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <Image Source="{Binding PairingQrCodeImage}" Width="168" Height="168" Stretch="Uniform" />
+            <StackPanel Spacing="8" VerticalAlignment="Center">
+              <ToggleSwitch IsChecked="{Binding AcceptNewPairing}" OnContent="Accept new pairing" OffContent="Pairing closed" />
+              <Button Content="Copy pairing payload" Command="{Binding CopyPairingPayloadCommand}" />
+              <Button Content="Regenerate code" Command="{Binding RegeneratePairingCodeCommand}" />
+            </StackPanel>
+          </StackPanel>
+          <TextBox Text="{Binding PairingPayload}" IsReadOnly="True" TextWrapping="Wrap" Height="64" Opacity="0.7" />
+        </StackPanel>
+      </Border>
+
+      <Grid Grid.Column="0" Grid.ColumnSpan="2" Grid.Row="1" ColumnDefinitions="*,*" RowDefinitions="*,*">
+        <DockPanel Grid.Column="0" Grid.Row="0" Margin="0,0,8,8">
+          <TextBlock DockPanel.Dock="Top" Text="Saved devices" FontWeight="SemiBold" Margin="0,0,0,6" />
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+            <Button Content="Select device" Command="{Binding ConnectSavedDeviceCommand}" />
+          </StackPanel>
+          <ListBox ItemsSource="{Binding SavedDevices}" SelectedItem="{Binding SelectedSavedDevice}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel>
+                  <TextBlock Text="{Binding DisplayName}" />
+                  <TextBlock Text="{Binding Status}" Opacity="0.7" FontSize="12" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+
+        <DockPanel Grid.Column="1" Grid.Row="0" Margin="8,0,0,8">
+          <TextBlock DockPanel.Dock="Top" Text="Recent clipboard" FontWeight="SemiBold" Margin="0,0,0,6" />
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+            <Button Content="Resend" Command="{Binding ResendRecentCommand}" />
+            <Button Content="Restore" Command="{Binding RestoreRecentCommand}" />
+            <Button Content="Apply deferred" Command="{Binding ApplyDeferredCommand}" />
+          </StackPanel>
+          <ListBox ItemsSource="{Binding RecentItems}" SelectedItem="{Binding SelectedRecentItem}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel>
+                  <TextBlock Text="{Binding PreviewText}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Opacity="0.7" FontSize="12">
+                    <Run Text="{Binding DirectionLabel}" />
+                    <Run Text=" · " />
+                    <Run Text="{Binding Status}" />
+                    <Run Text=" · " />
+                    <Run Text="{Binding ContentType}" />
+                  </TextBlock>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+
+        <DockPanel Grid.Column="0" Grid.ColumnSpan="2" Grid.Row="1" Margin="0,8,0,0">
+          <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Diagnostics" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <Button Content="Open log file" Command="{Binding OpenLogFileCommand}" />
+            </StackPanel>
+            <TextBlock Text="Live log list removed — it was redrawing the window (and Dash2Dock icon) continuously. Logs still go to the file."
+                       TextWrapping="Wrap" Opacity="0.7" FontSize="12" />
+            <TextBlock Text="{Binding LogFilePath}" TextWrapping="Wrap" Opacity="0.55" FontSize="11" FontFamily="monospace" />
+          </StackPanel>
+        </DockPanel>
+      </Grid>
+    </Grid>
+  </DockPanel>
+</Window>
