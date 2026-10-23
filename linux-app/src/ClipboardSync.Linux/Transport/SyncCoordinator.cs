@@ -411,10 +411,21 @@ public sealed class SyncCoordinator : IAsyncDisposable
             }
         }
 
-        var normalized = await _clipboardExtractor.ExtractCurrentAsync();
+        NormalizedClipboardItem? normalized = null;
+        for (var attempt = 0; attempt < 4 && normalized is null; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await Task.Delay(350);
+            }
+
+            normalized = await _clipboardExtractor.ExtractCurrentAsync();
+        }
+
         if (normalized is null)
         {
-            _logStore.Info("Clipboard update ignored because no supported payload was found");
+            var types = string.Join(",", await WaylandClipboard.ListTypesForMonitorAsync());
+            _logStore.Info($"Clipboard update ignored because no supported payload was found (types: {types})");
             return;
         }
 

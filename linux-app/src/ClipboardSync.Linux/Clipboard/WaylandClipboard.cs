@@ -82,12 +82,16 @@ public static class WaylandClipboard
         return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    public static async Task<string?> GetTextAsync(CancellationToken cancellationToken = default)
+    public static async Task<string?> GetTextAsync(
+        CancellationToken cancellationToken = default,
+        bool readTextBesideImageMime = false)
     {
         var types = await ListTypesAsync(cancellationToken);
         // If an image is offered, never read text — GNOME/Xwayland often also exposes
         // the PNG bytes as text/plain, which is what pastes as "�PNG...".
-        if (types.Any(t => t.Equals("image/png", StringComparison.OrdinalIgnoreCase)))
+        // Callers that already failed to read image/png may still need the text.
+        if (!readTextBesideImageMime &&
+            types.Any(t => t.Equals("image/png", StringComparison.OrdinalIgnoreCase)))
         {
             return null;
         }

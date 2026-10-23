@@ -70,7 +70,24 @@ public sealed class ClipboardMonitor : IDisposable
 
                 if (DateTimeOffset.UtcNow < _pausedUntil)
                 {
-                    _lastFingerprint = await BuildFingerprintAsync(cancellationToken) ?? _lastFingerprint;
+                    var pausedFingerprint = await BuildFingerprintAsync(cancellationToken);
+                    if (pausedFingerprint is null)
+                    {
+                        continue;
+                    }
+
+                    var textArrivedDuringPause =
+                        pausedFingerprint.StartsWith("text:", StringComparison.Ordinal) &&
+                        pausedFingerprint != _lastFingerprint;
+                    _lastFingerprint = pausedFingerprint;
+                    _lastWasPngAsText = pausedFingerprint.StartsWith("png-as-text:", StringComparison.Ordinal);
+                    // Image apply pauses the monitor so the new PNG is not echoed.
+                    // A real text copy in that window must still be sent.
+                    if (textArrivedDuringPause)
+                    {
+                        RaiseThrottled();
+                    }
+
                     continue;
                 }
 

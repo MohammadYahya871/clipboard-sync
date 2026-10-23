@@ -25,6 +25,7 @@ public sealed class ClipboardExtractor
 
         // Prefer image/png when present. GNOME/Xwayland often also exposes PNG bytes as
         // text/plain; text-first ordering then treats a screenshot as TEXT and syncs garbage.
+        var pngUnreadable = false;
         if (hasPng)
         {
             var bytes = await WaylandClipboard.GetPngAsync();
@@ -32,11 +33,13 @@ public sealed class ClipboardExtractor
             {
                 return BuildImageItem(bytes);
             }
+
+            pngUnreadable = true;
         }
 
         if (hasText || types.Length == 0)
         {
-            var text = await WaylandClipboard.GetTextAsync();
+            var text = await WaylandClipboard.GetTextAsync(readTextBesideImageMime: pngUnreadable);
             if (!string.IsNullOrWhiteSpace(text) &&
                 !WaylandClipboard.LooksLikePngAsText(text) &&
                 !WaylandClipboard.LooksLikeBinaryText(text) &&
