@@ -5,7 +5,8 @@ namespace ClipboardSync.Linux.Clipboard;
 
 /// <summary>
 /// Clipboard access for GNOME/Wayland.
-/// Image writes use a long-lived <c>wl-copy --foreground</c> owner (never xclip text).
+/// Image writes use a long-lived <c>xclip -quiet</c> owner (wl-copy only without xclip):
+/// GNOME 50 lacks data-control, so background wl-copy/wl-paste hang without focus.
 /// Reads prefer xclip to avoid Dash2Dock flicker from wl-paste polling.
 /// </summary>
 public static class WaylandClipboard
@@ -132,7 +133,20 @@ public static class WaylandClipboard
 
     public static async Task<byte[]?> GetPngAsync(CancellationToken cancellationToken = default)
     {
-        // Prefer wl-paste (source of truth for paste targets).
+        if (UsesXclip)
+        {
+            // xclip first: a background wl-paste can hang waiting for focus on GNOME 50.
+            var (xCode, xBytes, _) = await RunBytesAsync(
+                Xclip,
+                ["-selection", "clipboard", "-t", "image/png", "-o"],
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(8));
+            if (xCode == 0 && xBytes.Length > 0 && PngUtil.LooksLikePng(xBytes))
+            {
+                return xBytes;
+            }
+        }
+
         var (wlCode, wlBytes, _) = await RunBytesAsync(
             FindOnPath("wl-paste") ?? "wl-paste",
             ["--type", "image/png"],
@@ -143,22 +157,7 @@ public static class WaylandClipboard
             return wlBytes;
         }
 
-        if (!UsesXclip)
-        {
-            return null;
-        }
-
-        var (exitCode, bytes, _) = await RunBytesAsync(
-            Xclip,
-            ["-selection", "clipboard", "-t", "image/png", "-o"],
-            cancellationToken,
-            timeout: TimeSpan.FromSeconds(8));
-        if (exitCode != 0 || bytes.Length == 0 || !PngUtil.LooksLikePng(bytes))
-        {
-            return null;
-        }
-
-        return bytes;
+        return null;
     }
 
     public static async Task SetTextAsync(string text, CancellationToken cancellationToken = default)
@@ -175,12 +174,28 @@ public static class WaylandClipboard
         var wlCopy = FindOnPath("wl-copy") ?? "/usr/bin/wl-copy";
         StopImageOwner();
         // No --clear: it flickers Dash2Dock; a new wl-copy offer replaces the previous one.
-        await RunWithStdinAsync(
-            wlCopy,
-            ["--type", "text/plain;charset=utf-8"],
-            utf8,
-            cancellationToken,
-            timeout: TimeSpan.FromSeconds(8));
+        try
+        {
+            await RunWithStdinAsync(
+                wlCopy,
+                ["--type", "text/plain;charset=utf-8"],
+                utf8,
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(3));
+        }
+        catch (TimeoutException) when (UsesXclip)
+        {
+            // GNOME 50: background wl-copy hangs when it cannot get keyboard focus.
+            Log?.Invoke("wl-copy text write timed out; falling back to xclip UTF8_STRING");
+            // Silence via the shell: xclip forks a background owner that would otherwise
+            // hold our stderr pipe open and stall WaitForExit.
+            await RunWithStdinAsync(
+                "/bin/bash",
+                ["-c", "exec \"$1\" -selection clipboard -t UTF8_STRING -i >/dev/null 2>&1", "_", Xclip],
+                utf8,
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(3));
+        }
     }
 
     public static async Task SetPngAsync(byte[] pngBytes, CancellationToken cancellationToken = default)
@@ -200,18 +215,32 @@ public static class WaylandClipboard
         var tempFile = Path.Combine(imageDir, $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{Guid.NewGuid():N}.png");
         await File.WriteAllBytesAsync(tempFile, pngBytes, cancellationToken);
 
-        var wlCopy = FindOnPath("wl-copy") ?? "/usr/bin/wl-copy";
-        if (!File.Exists(wlCopy))
+        if (UsesXclip)
         {
-            throw new InvalidOperationException("wl-copy not found; cannot set image/png on Wayland.");
+            // GNOME 50 has no data-control protocol, so a background wl-copy only owns the
+            // selection when it wins keyboard focus — it otherwise hangs forever. Xwayland
+            // selections need no focus and mutter bridges them to Wayland clients.
+            StartImageOwner(
+                "exec \"$1\" -quiet -selection clipboard -t image/png -i \"$2\" >/dev/null 2>&1",
+                Xclip,
+                tempFile);
         }
+        else
+        {
+            var wlCopy = FindOnPath("wl-copy") ?? "/usr/bin/wl-copy";
+            if (!File.Exists(wlCopy))
+            {
+                throw new InvalidOperationException("wl-copy not found; cannot set image/png on Wayland.");
+            }
 
-        // Do not wl-copy --clear here — that flickers Dash2Dock. Replacing the owner is enough.
-        StartImageOwner(wlCopy, tempFile);
+            // Do not wl-copy --clear here — that flickers Dash2Dock. Replacing the owner is enough.
+            // --foreground keeps this process as the clipboard data source until replaced.
+            StartImageOwner("exec \"$1\" --type image/png --foreground < \"$2\"", wlCopy, tempFile);
+        }
 
         if (!await WaitForRealImageAsync(TimeSpan.FromSeconds(10), cancellationToken))
         {
-            var types = string.Join(", ", await ListWaylandTypesAsync(cancellationToken));
+            var types = string.Join(", ", await ListTypesForMonitorAsync(cancellationToken));
             throw new InvalidOperationException(
                 $"Failed to place image/png on the clipboard (types after write: {types}).");
         }
@@ -224,7 +253,7 @@ public static class WaylandClipboard
                 "wl-copy advertised image/png but paste did not return a PNG signature.");
         }
 
-        Log?.Invoke($"SetPng ok ({pngBytes.Length} bytes) types={string.Join(',', await ListWaylandTypesAsync(cancellationToken))}");
+        Log?.Invoke($"SetPng ok ({pngBytes.Length} bytes) types={string.Join(',', await ListTypesForMonitorAsync(cancellationToken))}");
     }
 
     public static async Task<bool> ClipboardHasRealImageAsync(CancellationToken cancellationToken = default)
@@ -477,14 +506,14 @@ public static class WaylandClipboard
         return LooksLikeBinary(Encoding.UTF8.GetBytes(text));
     }
 
-    private static void StartImageOwner(string wlCopyPath, string pngFile)
+    private static void StartImageOwner(string script, string ownerPath, string pngFile)
     {
         lock (ImageOwnerGate)
         {
             StopImageOwner_NoLock();
 
-            // Use shell redirect so wl-copy owns a real file-backed stdin. Feeding
-            // redirected StandardInput from .NET has been flaky on this GNOME setup.
+            // Use a shell so the owner reads a real file. Feeding redirected
+            // StandardInput from .NET has been flaky on this GNOME setup.
             var psi = new ProcessStartInfo
             {
                 FileName = "/bin/bash",
@@ -494,30 +523,30 @@ public static class WaylandClipboard
                 RedirectStandardOutput = false,
                 RedirectStandardError = false
             };
-            // --foreground keeps this process as the clipboard data source until replaced.
             psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(
-                "exec \"$1\" --type image/png --foreground < \"$2\"");
+            psi.ArgumentList.Add(script);
             psi.ArgumentList.Add("_");
-            psi.ArgumentList.Add(wlCopyPath);
+            psi.ArgumentList.Add(ownerPath);
             psi.ArgumentList.Add(pngFile);
 
-            var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start wl-copy");
-            // Give wl-copy a moment to claim the selection before we consider it live.
+            var ownerName = Path.GetFileName(ownerPath);
+            var process = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {ownerName}");
+            // Give the owner a moment to claim the selection before we consider it live.
             Thread.Sleep(80);
             if (process.HasExited)
             {
                 throw new InvalidOperationException(
-                    $"wl-copy image owner exited immediately (code={process.ExitCode}).");
+                    $"{ownerName} image owner exited immediately (code={process.ExitCode}).");
             }
 
             _imageOwner = process;
             _imageOwnerFile = pngFile;
-            Log?.Invoke($"Started wl-copy image owner pid={process.Id} file={pngFile}");
+            Log?.Invoke($"Started {ownerName} image owner pid={process.Id} file={pngFile}");
         }
     }
 
-    private static void StopImageOwner()
+    /// <summary>Kill the image owner so it does not outlive the app.</summary>
+    public static void StopImageOwner()
     {
         lock (ImageOwnerGate)
         {
@@ -569,12 +598,17 @@ public static class WaylandClipboard
     private static async Task<bool> PeekPngMagicAsync(CancellationToken cancellationToken)
     {
         // bash + head so we never buffer the whole screenshot in this process.
-        var wlPaste = FindOnPath("wl-paste") ?? "/usr/bin/wl-paste";
-        var (exitCode, bytes, _) = await RunBytesAsync(
-            "/bin/bash",
-            ["-c", "exec \"$1\" --type image/png 2>/dev/null | head -c 8", "_", wlPaste],
-            cancellationToken,
-            timeout: TimeSpan.FromSeconds(3));
+        var (exitCode, bytes, _) = UsesXclip
+            ? await RunBytesAsync(
+                "/bin/bash",
+                ["-c", "exec \"$1\" -selection clipboard -t image/png -o 2>/dev/null | head -c 8", "_", Xclip],
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(3))
+            : await RunBytesAsync(
+                "/bin/bash",
+                ["-c", "exec \"$1\" --type image/png 2>/dev/null | head -c 8", "_", FindOnPath("wl-paste") ?? "/usr/bin/wl-paste"],
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(3));
         return exitCode == 0 && PngUtil.LooksLikePng(bytes);
     }
 

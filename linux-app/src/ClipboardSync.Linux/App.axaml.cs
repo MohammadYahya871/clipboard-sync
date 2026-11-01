@@ -47,6 +47,8 @@ public partial class App : Application
                 {
                     await _coordinator.DisposeAsync();
                 }
+
+                Clipboard.WaylandClipboard.StopImageOwner();
             };
 
             try
