@@ -26,16 +26,19 @@ class ClipboardNormalizer(
 ) {
     private val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    suspend fun normalizeCurrentClipboard(logSnapshot: Boolean = false): NormalizedClipboard? {
+    suspend fun normalizeCurrentClipboard(
+        logSnapshot: Boolean = false,
+        logNormalized: Boolean = true
+    ): NormalizedClipboard? {
         val clip = clipboardManager.primaryClip ?: return null
         if (clip.itemCount == 0) return null
         if (logSnapshot) {
             logger.info("Clipboard snapshot: ${describeClip(clip)}")
         }
-        return normalizeClip(clip)
+        return normalizeClip(clip, logNormalized)
     }
 
-    suspend fun normalizeClip(clip: ClipData): NormalizedClipboard? = withContext(Dispatchers.IO) {
+    suspend fun normalizeClip(clip: ClipData, logNormalized: Boolean = true): NormalizedClipboard? = withContext(Dispatchers.IO) {
         val sourceDeviceId = localDeviceIdentityStore.deviceId
         val clipMimeTypes = buildList {
             val description = clip.description
@@ -55,9 +58,11 @@ class ClipboardNormalizer(
                 val candidateUris = extractCandidateUris(item, rawText)
                 for (uri in candidateUris) {
                     if (!shouldTryImage(uri, clipMimeTypes)) continue
-                    logger.info(
-                        "Attempting to normalize clipboard image URI from item $itemIndex: $uri (${clipMimeTypes.joinToString()})"
-                    )
+                    if (logNormalized) {
+                        logger.info(
+                            "Attempting to normalize clipboard image URI from item $itemIndex: $uri (${clipMimeTypes.joinToString()})"
+                        )
+                    }
                     normalizeImageUri(uri, sourceDeviceId)?.let { return it }
                 }
             }
@@ -79,7 +84,9 @@ class ClipboardNormalizer(
                 } else {
                     ContentType.TEXT
                 }
-                logger.info("Normalized clipboard item $itemIndex as $type (${normalizedText.take(80)})")
+                if (logNormalized) {
+                    logger.info("Normalized clipboard item $itemIndex as $type (${normalizedText.take(80)})")
+                }
                 return NormalizedClipboard(
                     event = ClipboardEvent(
                         eventId = CryptoUtils.uuidV7(),
@@ -109,7 +116,9 @@ class ClipboardNormalizer(
             tryNormalizeImages()?.let { return@withContext it }
         }
 
-        logger.warn("Clipboard entry is unsupported or empty")
+        if (logNormalized) {
+            logger.warn("Clipboard entry is unsupported or empty")
+        }
         null
     }
 

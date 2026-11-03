@@ -44,6 +44,11 @@ public partial class MainViewModel : ViewModelBase
             {
                 Interlocked.Exchange(ref _statusRaiseQueued, 0);
                 RaiseStatus();
+                if (LastActionFeedback == "Waiting for Android to reconnect..." &&
+                    _coordinator.ConnectionLabel == "Connected")
+                {
+                    LastActionFeedback = "Connected.";
+                }
             }, DispatcherPriority.Background);
         };
     }
@@ -268,8 +273,8 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void Reconnect()
     {
+        LastActionFeedback = "Waiting for Android to reconnect...";
         _coordinator.ManualReconnect();
-        LastActionFeedback = "Reconnecting...";
         RaiseStatus();
     }
 

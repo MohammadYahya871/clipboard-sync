@@ -72,6 +72,16 @@ public sealed class SyncCoordinator : IAsyncDisposable
             {
                 _authenticated = false;
                 _connectedPeerDeviceId = null;
+                lock (_outboundGate)
+                {
+                    if (_inFlightOutboundEventId is { } eventId &&
+                        _pendingByEventId.TryGetValue(eventId, out var pending))
+                    {
+                        _outboundQueue.Enqueue(pending);
+                    }
+
+                    _inFlightOutboundEventId = null;
+                }
             }
 
             // Only refresh the device list on connect — clearing ListBox on every
@@ -340,7 +350,8 @@ public sealed class SyncCoordinator : IAsyncDisposable
 
     public void ManualReconnect()
     {
-        _connectionLabel = _lanServer.HasClient ? "Connected" : "Listening";
+        _lanServer.DisconnectClient();
+        _connectionLabel = "Listening";
         RefreshSavedDevices();
         OnStateChanged();
     }
@@ -561,11 +572,11 @@ public sealed class SyncCoordinator : IAsyncDisposable
             pending.Item.Event with { TransferState = TransferState.AWAITING_ACK },
             pending.Item.ImageBytes,
             _cts.Token);
-        _ = TrackAckTimeoutAsync(pending.Item.Event.EventId, pending.Item.Event.ContentType);
+        _ = TrackAckTimeoutAsync(pending.Item.Event.EventId, pending.Item.Event.ContentType, pending.Attempts);
         OnStateChanged();
     }
 
-    private async Task TrackAckTimeoutAsync(string eventId, ContentType contentType)
+    private async Task TrackAckTimeoutAsync(string eventId, ContentType contentType, int attempt)
     {
         var timeout = contentType is ContentType.IMAGE
             ? TimeSpan.FromSeconds(45)
@@ -579,17 +590,19 @@ public sealed class SyncCoordinator : IAsyncDisposable
             return;
         }
 
-        if (!_pendingByEventId.TryGetValue(eventId, out var pending))
+        if (!_pendingByEventId.TryGetValue(eventId, out var pending) || pending.Attempts != attempt)
         {
             return;
         }
 
         lock (_outboundGate)
         {
-            if (string.Equals(_inFlightOutboundEventId, eventId, StringComparison.Ordinal))
+            if (!string.Equals(_inFlightOutboundEventId, eventId, StringComparison.Ordinal))
             {
-                _inFlightOutboundEventId = null;
+                return;
             }
+
+            _inFlightOutboundEventId = null;
         }
 
         if (pending.Attempts >= 3)

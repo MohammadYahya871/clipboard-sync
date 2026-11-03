@@ -17,7 +17,7 @@ public sealed class LanServer : IAsyncDisposable
     private readonly int _port;
     private readonly AppLogStore _logStore;
     private WebApplication? _app;
-    private WebSocket? _socket;
+    private volatile WebSocket? _socket;
 
     public LanServer(
         X509Certificate2 certificate,
@@ -32,6 +32,20 @@ public sealed class LanServer : IAsyncDisposable
     public bool HasClient => _socket?.State == WebSocketState.Open;
 
     public event EventHandler<string>? ConnectionStateChanged;
+
+    public void DisconnectClient()
+    {
+        var socket = _socket;
+        if (socket is null)
+        {
+            return;
+        }
+
+        _socket = null;
+        socket.Abort();
+        ConnectionStateChanged?.Invoke(this, "Listening");
+        _logStore.Info("Closed Android WebSocket to request a fresh connection");
+    }
 
     public async Task StartAsync(Func<ProtocolEnvelope, Task> handler, CancellationToken cancellationToken)
     {
@@ -60,8 +74,9 @@ public sealed class LanServer : IAsyncDisposable
             }
 
             using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            _socket?.Abort();
             _socket = socket;
-            ConnectionStateChanged?.Invoke(this, "Connected");
+            ConnectionStateChanged?.Invoke(this, "Authenticating");
             _logStore.Info("Android client connected to LAN WebSocket");
             try
             {
@@ -79,8 +94,11 @@ public sealed class LanServer : IAsyncDisposable
             {
                 _logStore.Error("LAN WebSocket receive loop failed", exception);
             }
-            _socket = null;
-            ConnectionStateChanged?.Invoke(this, "Disconnected");
+            if (ReferenceEquals(_socket, socket))
+            {
+                _socket = null;
+                ConnectionStateChanged?.Invoke(this, "Listening");
+            }
             _logStore.Warn("Android client disconnected from LAN WebSocket");
         });
 
@@ -92,7 +110,8 @@ public sealed class LanServer : IAsyncDisposable
 
     public async Task SendAsync(ProtocolEnvelope envelope, CancellationToken cancellationToken = default)
     {
-        if (_socket?.State != WebSocketState.Open)
+        var socket = _socket;
+        if (socket?.State != WebSocketState.Open)
         {
             _logStore.Warn($"Skipped sending {envelope.Type} because no WebSocket client is connected");
             return;
@@ -106,13 +125,16 @@ public sealed class LanServer : IAsyncDisposable
         var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, ProtocolJson.Options));
         try
         {
-            await _socket.SendAsync(payload, WebSocketMessageType.Text, true, cancellationToken);
+            await socket.SendAsync(payload, WebSocketMessageType.Text, true, cancellationToken);
         }
         catch (Exception exception) when (exception is WebSocketException or InvalidOperationException or OperationCanceledException)
         {
             _logStore.Warn($"Failed to send envelope {envelope.Type}: {exception.Message}");
-            _socket = null;
-            ConnectionStateChanged?.Invoke(this, "Disconnected");
+            if (ReferenceEquals(_socket, socket))
+            {
+                _socket = null;
+                ConnectionStateChanged?.Invoke(this, "Listening");
+            }
         }
     }
 

@@ -34,6 +34,7 @@ import com.clipboardsync.android.transport.LanPeerDiscovery
 import com.clipboardsync.android.transport.NsdPeerDiscovery
 import com.clipboardsync.android.transport.TransportSelector
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -195,7 +196,13 @@ class SyncRepository(
             // (offer + begin + N chunks + complete). collectLatest cancels in-flight
             // handlers and drops chunks, so images never apply / never ack.
             lanClient.incoming.collect { envelope ->
-                handleIncomingEnvelope(envelope)
+                try {
+                    handleIncomingEnvelope(envelope)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    logger.error("Failed to handle incoming ${envelope.type}", exception)
+                }
             }
         }
         nsdPeerDiscovery.start()
@@ -1224,7 +1231,10 @@ class SyncRepository(
         logSnapshot: Boolean
     ): NormalizedClipboard? {
         val normalized = runCatching {
-            clipboardNormalizer.normalizeCurrentClipboard(logSnapshot = logSnapshot)
+            clipboardNormalizer.normalizeCurrentClipboard(
+                logSnapshot = logSnapshot,
+                logNormalized = trigger != "clipboard-poll"
+            )
         }.getOrElse {
             logger.error("Failed to read clipboard for $trigger", it)
             return null

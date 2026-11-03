@@ -48,9 +48,11 @@ class LanClient(
 
     private var client: OkHttpClient? = null
     private var webSocket: WebSocket? = null
+    @Volatile private var connectionGeneration = 0
 
     fun connect(peer: TrustedPeer, localDeviceId: String) {
         disconnect()
+        val generation = ++connectionGeneration
         // Drain any stale envelopes from a previous socket.
         while (incomingChannel.tryReceive().isSuccess) {
             // drop
@@ -63,6 +65,7 @@ class LanClient(
             .sslSocketFactory(sslContext.socketFactory, trustManager)
             .hostnameVerifier(HostnameVerifier { _, _ -> true })
             .readTimeout(0, TimeUnit.MILLISECONDS)
+            .pingInterval(20, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder()
             .url("wss://${peer.host}:${peer.port}/ws")
@@ -70,6 +73,7 @@ class LanClient(
         client = okHttp
         webSocket = okHttp.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (generation != connectionGeneration) return
                 _state.value = LanConnectionState.CONNECTED
                 logger.info("LAN WebSocket opened to ${peer.host}:${peer.port}")
                 sendEnvelope(
@@ -82,6 +86,7 @@ class LanClient(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (generation != connectionGeneration) return
                 runCatching {
                     ProtocolJson.codec.decodeFromString<ProtocolEnvelope>(text)
                 }.onSuccess {
@@ -98,11 +103,13 @@ class LanClient(
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (generation != connectionGeneration) return
                 _state.value = LanConnectionState.DISCONNECTED
                 logger.warn("LAN socket closing: $code $reason")
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (generation != connectionGeneration) return
                 _state.value = LanConnectionState.FAILED
                 logger.error("LAN socket failure", t)
             }
@@ -110,6 +117,7 @@ class LanClient(
     }
 
     fun disconnect() {
+        connectionGeneration++
         webSocket?.close(1000, "disconnect")
         webSocket = null
         client?.dispatcher?.executorService?.shutdown()
