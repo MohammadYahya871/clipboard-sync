@@ -3,7 +3,7 @@
     <string name="service_channel_name">Clipboard sync service</string>
     <string name="service_channel_description">Keeps the LAN sync session alive while sync is enabled.</string>
     <string name="service_notification_title">Clipboard Sync active</string>
-    <string name="service_notification_text">Clipboard link is active. Text and copied images sync automatically; use Sync for screenshots.</string>
+    <string name="service_notification_text">Clipboard link is active. Screenshots sync automatically; tap Sync to send what you copied.</string>
     <string name="service_notification_action_sync">Sync</string>
     <string name="service_notification_action_pause">Pause</string>
     <string name="service_wake_channel_name">Clipboard sync wake</string>
