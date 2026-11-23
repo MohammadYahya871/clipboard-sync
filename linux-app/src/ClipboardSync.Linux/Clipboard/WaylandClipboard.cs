@@ -169,24 +169,15 @@ public static class WaylandClipboard
         }
 
         var utf8 = Encoding.UTF8.GetBytes(text);
-        // Always use wl-copy for text writes. xclip's text/plain;charset=utf-8 path is
-        // exactly what produced "PNG bytes as text" on this GNOME setup.
-        var wlCopy = FindOnPath("wl-copy") ?? "/usr/bin/wl-copy";
         StopImageOwner();
-        // No --clear: it flickers Dash2Dock; a new wl-copy offer replaces the previous one.
-        try
+
+        if (UsesXclip)
         {
-            await RunWithStdinAsync(
-                wlCopy,
-                ["--type", "text/plain;charset=utf-8"],
-                utf8,
-                cancellationToken,
-                timeout: TimeSpan.FromSeconds(3));
-        }
-        catch (TimeoutException) when (UsesXclip)
-        {
-            // GNOME 50: background wl-copy hangs when it cannot get keyboard focus.
-            Log?.Invoke("wl-copy text write timed out; falling back to xclip UTF8_STRING");
+            // GNOME has no data-control protocol: a background wl-copy must grab keyboard
+            // focus to own the clipboard, which steals focus from the field being typed in
+            // and then times out. xclip UTF8_STRING needs no focus; Mutter bridges it to
+            // Wayland as text/plain;charset=utf-8. (Not xclip text/plain;charset=utf-8,
+            // which produced "PNG bytes as text" on this setup.)
             // Silence via the shell: xclip forks a background owner that would otherwise
             // hold our stderr pipe open and stall WaitForExit.
             await RunWithStdinAsync(
@@ -195,7 +186,17 @@ public static class WaylandClipboard
                 utf8,
                 cancellationToken,
                 timeout: TimeSpan.FromSeconds(3));
+            return;
         }
+
+        var wlCopy = FindOnPath("wl-copy") ?? "/usr/bin/wl-copy";
+        // No --clear: it flickers Dash2Dock; a new wl-copy offer replaces the previous one.
+        await RunWithStdinAsync(
+            wlCopy,
+            ["--type", "text/plain;charset=utf-8"],
+            utf8,
+            cancellationToken,
+            timeout: TimeSpan.FromSeconds(3));
     }
 
     public static async Task SetPngAsync(byte[] pngBytes, CancellationToken cancellationToken = default)

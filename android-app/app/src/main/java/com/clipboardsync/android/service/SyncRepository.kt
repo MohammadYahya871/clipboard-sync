@@ -165,7 +165,16 @@ class SyncRepository(
     private var lastLocalClipboardAt = Instant.EPOCH
     private var lastRemoteAppliedAt = Instant.EPOCH
     private var lastImageQueuedAt = Instant.EPOCH
-    private var lastQueuedLocalHash: String? = null
+    /**
+     * Hash of the last item exchanged in either direction. Persisted because Android often
+     * kills the app in the background: with it lost, every foreground-resume re-sent the
+     * phone's unchanged (stale) clipboard and overwrote newer content on the computer.
+     */
+    private var lastQueuedLocalHash: String? = prefs.getString(KEY_LAST_EXCHANGED_HASH, null)
+        set(value) {
+            field = value
+            prefs.edit().putString(KEY_LAST_EXCHANGED_HASH, value).apply()
+        }
     private var reconnectJob: Job? = null
     private var discoveryConnectJob: Job? = null
     private var nearbyScanJob: Job? = null
@@ -1502,6 +1511,7 @@ class SyncRepository(
         private const val KEY_ALLOW_IMAGE_SYNC = "allow_image_sync"
         private const val KEY_MAX_IMAGE_SIZE_MB = "max_image_size_mb"
         private const val KEY_LAST_SCREENSHOT_ID = "last_screenshot_id"
+        private const val KEY_LAST_EXCHANGED_HASH = "last_exchanged_hash"
         private const val CONFLICT_WINDOW_MILLIS = 2_500L
         private const val CLIPBOARD_CHANGE_DEBOUNCE_MS = 250L
         private const val CLIPBOARD_REFRESH_RETRY_COUNT = 4

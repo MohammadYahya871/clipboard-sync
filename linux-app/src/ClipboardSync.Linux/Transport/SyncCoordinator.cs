@@ -481,6 +481,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
         _loopGuard.RememberSeenEvent(normalized.Event.EventId);
         // Treat our outbound hash as "already applied" so a peer echo cannot bounce back.
         _loopGuard.MarkRemoteApplied(normalized.Event.ContentHashSha256);
+        _loopGuard.RememberExchanged(ExchangeKeys(normalized.Event));
         var pending = new PendingEvent(normalized);
         lock (_outboundGate)
         {
@@ -879,6 +880,18 @@ public sealed class SyncCoordinator : IAsyncDisposable
             }
         }
 
+        // The phone re-offers its current clipboard whenever its app comes to the foreground.
+        // If that content was already exchanged and this side has moved on since (checked
+        // above: it is not what is on the clipboard now), applying it would replace a newer
+        // local copy (e.g. a GPaste history pick) with a stale one.
+        if (_loopGuard.WasExchanged(ExchangeKeys(clipboardEvent)))
+        {
+            _logStore.Info($"Ignoring stale remote {clipboardEvent.ContentType} {clipboardEvent.EventId}; already exchanged earlier");
+            _loopGuard.RememberSeenEvent(clipboardEvent.EventId);
+            await SendClipboardAckAsync(clipboardEvent, "skipped_stale");
+            return;
+        }
+
         // Protect a fresh local IMAGE/manual copy briefly. TEXT/URL from the phone always apply
         // (the old 2.5s window was dropping real phone text during reconnect races).
         if (clipboardEvent.ContentType is ContentType.IMAGE &&
@@ -997,6 +1010,7 @@ public sealed class SyncCoordinator : IAsyncDisposable
             StartMaintainRemoteImage(imageBytes);
         }
 
+        _loopGuard.RememberExchanged(ExchangeKeys(clipboardEvent));
         _logStore.Info($"Applied remote clipboard event {clipboardEvent.EventId}");
         await AddRecentAsync(
             new NormalizedClipboardItem(
@@ -1007,6 +1021,20 @@ public sealed class SyncCoordinator : IAsyncDisposable
             "Android -> Linux",
             "Applied");
         await SendClipboardAckAsync(clipboardEvent, "applied");
+    }
+
+    /// <summary>
+    /// Identity of an item's content for stale-offer detection. Content hashes can differ
+    /// across platforms for equivalent text, so text also gets a hash of its normalized form.
+    /// </summary>
+    private static IEnumerable<string> ExchangeKeys(ClipboardEvent clipboardEvent)
+    {
+        yield return "h:" + clipboardEvent.ContentHashSha256;
+        if (clipboardEvent.ContentType is ContentType.TEXT or ContentType.URL &&
+            !string.IsNullOrEmpty(clipboardEvent.TextPayload))
+        {
+            yield return "t:" + CryptoUtils.Sha256Hex(clipboardEvent.TextPayload.Replace("\r\n", "\n"));
+        }
     }
 
     /// <summary>
