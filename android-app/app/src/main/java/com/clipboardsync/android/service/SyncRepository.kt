@@ -1331,18 +1331,29 @@ class SyncRepository(
         screenshotObserver = screenshotRepository.observe(scope) {
             if (!isPrivacyPaused()) {
                 scope.launch {
-                    syncLatestScreenshotIfNeeded("media-observer")
+                    // Only a screenshot taken just now. The first MediaStore change fires while
+                    // the new file is still pending (hidden from queries), so a wider window
+                    // re-sent the previous screenshot before the new one.
+                    syncLatestScreenshotIfNeeded(
+                        "media-observer",
+                        maxAgeMillis = OBSERVER_SCREENSHOT_MAX_AGE_MILLIS
+                    )
                 }
             }
         }
     }
 
-    private suspend fun syncLatestScreenshotIfNeeded(trigger: String, force: Boolean = false) {
-        val screenshot = screenshotRepository.latestScreenshot() ?: run {
-            logger.warn("No recent screenshot found for $trigger")
+    private suspend fun syncLatestScreenshotIfNeeded(
+        trigger: String,
+        force: Boolean = false,
+        maxAgeMillis: Long = 10 * 60 * 1000L
+    ) {
+        val screenshot = screenshotRepository.latestScreenshot(maxAgeMillis) ?: run {
+            logger.info("No new screenshot found for $trigger")
             return
         }
-        if (!force && screenshot.id == lastSyncedScreenshotId) {
+        // MediaStore ids only grow, so anything at or below the last synced id is old.
+        if (!force && screenshot.id <= lastSyncedScreenshotId) {
             logger.info("Skipped already synced screenshot ${screenshot.displayName}")
             return
         }
@@ -1512,6 +1523,7 @@ class SyncRepository(
         private const val KEY_MAX_IMAGE_SIZE_MB = "max_image_size_mb"
         private const val KEY_LAST_SCREENSHOT_ID = "last_screenshot_id"
         private const val KEY_LAST_EXCHANGED_HASH = "last_exchanged_hash"
+        private const val OBSERVER_SCREENSHOT_MAX_AGE_MILLIS = 20_000L
         private const val CONFLICT_WINDOW_MILLIS = 2_500L
         private const val CLIPBOARD_CHANGE_DEBOUNCE_MS = 250L
         private const val CLIPBOARD_REFRESH_RETRY_COUNT = 4
